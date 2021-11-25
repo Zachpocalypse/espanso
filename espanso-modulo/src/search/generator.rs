@@ -21,19 +21,23 @@ use crate::search::config::SearchConfig;
 use crate::sys::search::types;
 
 pub fn generate(config: SearchConfig) -> types::Search {
-  let items = config
+  let mut items: Vec<types::SearchItem> = config
     .items
     .into_iter()
     .map(|item| types::SearchItem {
       id: item.id,
       label: item.label,
       trigger: item.trigger,
+      is_builtin: item.is_builtin,
     })
     .collect();
+
+  items.sort_by(|a, b| a.label.as_str().cmp(b.label.as_str()));
 
   types::Search {
     title: config.title,
     items,
     icon: config.icon,
+    hint: config.hint,
   }
 }

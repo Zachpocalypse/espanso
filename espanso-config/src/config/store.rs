@@ -17,37 +17,39 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::error::NonFatalErrorSet;
+
 use super::{resolve::ResolvedConfig, Config, ConfigStore, ConfigStoreError};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::{debug, error};
+use std::sync::Arc;
 use std::{collections::HashSet, path::Path};
 
 pub(crate) struct DefaultConfigStore {
-  default: Box<dyn Config>,
-  customs: Vec<Box<dyn Config>>,
+  default: Arc<dyn Config>,
+  customs: Vec<Arc<dyn Config>>,
 }
 
 impl ConfigStore for DefaultConfigStore {
-  fn default(&self) -> &dyn super::Config {
-    self.default.as_ref()
+  fn default(&self) -> Arc<dyn super::Config> {
+    Arc::clone(&self.default)
   }
 
-  fn active<'a>(&'a self, app: &super::AppProperties) -> &'a dyn super::Config {
+  fn active<'a>(&'a self, app: &super::AppProperties) -> Arc<dyn super::Config> {
     // Find a custom config that matches or fallback to the default one
     for custom in self.customs.iter() {
       if custom.is_match(app) {
-        return custom.as_ref();
+        return Arc::clone(custom);
       }
     }
-    self.default.as_ref()
+    Arc::clone(&self.default)
   }
 
-  fn configs(&self) -> Vec<&dyn Config> {
-    let mut configs = Vec::new();
+  fn configs(&self) -> Vec<Arc<dyn Config>> {
+    let mut configs = vec![Arc::clone(&self.default)];
 
-    configs.push(self.default.as_ref());
     for custom in self.customs.iter() {
-      configs.push(custom.as_ref());
+      configs.push(Arc::clone(custom));
     }
 
     configs
@@ -67,8 +69,7 @@ impl ConfigStore for DefaultConfigStore {
 }
 
 impl DefaultConfigStore {
-  // TODO: test
-  pub fn load(config_dir: &Path) -> Result<Self> {
+  pub fn load(config_dir: &Path) -> Result<(Self, Vec<NonFatalErrorSet>)> {
     if !config_dir.is_dir() {
       return Err(ConfigStoreError::InvalidConfigDir().into());
     }
@@ -78,11 +79,15 @@ impl DefaultConfigStore {
     if !default_file.exists() || !default_file.is_file() {
       return Err(ConfigStoreError::MissingDefault().into());
     }
-    let default = ResolvedConfig::load(&default_file, None)?;
+
+    let mut non_fatal_errors = Vec::new();
+
+    let default = ResolvedConfig::load(&default_file, None)
+      .context("failed to load default.yml configuration")?;
     debug!("loaded default config at path: {:?}", default_file);
 
     // Then the others
-    let mut customs: Vec<Box<dyn Config>> = Vec::new();
+    let mut customs: Vec<Arc<dyn Config>> = Vec::new();
     for entry in std::fs::read_dir(config_dir).map_err(ConfigStoreError::IOError)? {
       let entry = entry?;
       let config_file = entry.path();
@@ -99,7 +104,7 @@ impl DefaultConfigStore {
       {
         match ResolvedConfig::load(&config_file, Some(&default)) {
           Ok(config) => {
-            customs.push(Box::new(config));
+            customs.push(Arc::new(config));
             debug!("loaded config at path: {:?}", config_file);
           }
           Err(err) => {
@@ -107,18 +112,22 @@ impl DefaultConfigStore {
               "unable to load config at path: {:?}, with error: {}",
               config_file, err
             );
+            non_fatal_errors.push(NonFatalErrorSet::single_error(&config_file, err));
           }
         }
       }
     }
 
-    Ok(Self {
-      default: Box::new(default),
-      customs,
-    })
+    Ok((
+      Self {
+        default: Arc::new(default),
+        customs,
+      },
+      non_fatal_errors,
+    ))
   }
 
-  pub fn from_configs(default: Box<dyn Config>, customs: Vec<Box<dyn Config>>) -> Result<Self> {
+  pub fn from_configs(default: Arc<dyn Config>, customs: Vec<Arc<dyn Config>>) -> Result<Self> {
     Ok(Self { default, customs })
   }
 }
@@ -144,8 +153,8 @@ mod tests {
     let custom2 = new_mock("custom2", true);
 
     let store = DefaultConfigStore {
-      default: Box::new(default),
-      customs: vec![Box::new(custom1), Box::new(custom2)],
+      default: Arc::new(default),
+      customs: vec![Arc::new(custom1), Arc::new(custom2)],
     };
 
     assert_eq!(store.default().label(), "default");
@@ -168,8 +177,8 @@ mod tests {
     let custom2 = new_mock("custom2", false);
 
     let store = DefaultConfigStore {
-      default: Box::new(default),
-      customs: vec![Box::new(custom1), Box::new(custom2)],
+      default: Arc::new(default),
+      customs: vec![Arc::new(custom1), Arc::new(custom2)],
     };
 
     assert_eq!(store.default().label(), "default");

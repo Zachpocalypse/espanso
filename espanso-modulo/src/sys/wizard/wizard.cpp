@@ -30,12 +30,15 @@
 const int WELCOME_PAGE_INDEX = 0;
 const int MOVE_BUNDLE_PAGE_INDEX = WELCOME_PAGE_INDEX + 1;
 const int LEGACY_VERSION_PAGE_INDEX = MOVE_BUNDLE_PAGE_INDEX + 1;
-const int MIGRATE_PAGE_INDEX = LEGACY_VERSION_PAGE_INDEX + 1;
-const int ADD_PATH_PAGE_INDEX = MIGRATE_PAGE_INDEX + 1;
+const int WRONG_EDITION_PAGE_INDEX = LEGACY_VERSION_PAGE_INDEX + 1;
+const int MIGRATE_PAGE_INDEX = WRONG_EDITION_PAGE_INDEX + 1;
+const int AUTO_START_PAGE_INDEX = MIGRATE_PAGE_INDEX + 1;
+const int ADD_PATH_PAGE_INDEX = AUTO_START_PAGE_INDEX + 1;
 const int ACCESSIBILITY_PAGE_INDEX = ADD_PATH_PAGE_INDEX + 1;
 const int MAX_PAGE_INDEX = ACCESSIBILITY_PAGE_INDEX + 1; // Update if a new page is added at the end
 
-WizardMetadata *metadata = nullptr;
+WizardMetadata *wizard_metadata = nullptr;
+int completed_successfully = 0;
 
 // App Code
 
@@ -56,32 +59,42 @@ int find_next_page(int current_index)
   switch (next_index)
   {
   case WELCOME_PAGE_INDEX:
-    if (metadata->is_welcome_page_enabled)
+    if (wizard_metadata->is_welcome_page_enabled)
     {
       return WELCOME_PAGE_INDEX;
     }
   case MOVE_BUNDLE_PAGE_INDEX:
-    if (metadata->is_move_bundle_page_enabled)
+    if (wizard_metadata->is_move_bundle_page_enabled)
     {
       return MOVE_BUNDLE_PAGE_INDEX;
     }
   case LEGACY_VERSION_PAGE_INDEX:
-    if (metadata->is_legacy_version_page_enabled)
+    if (wizard_metadata->is_legacy_version_page_enabled)
     {
       return LEGACY_VERSION_PAGE_INDEX;
     }
+  case WRONG_EDITION_PAGE_INDEX:
+    if (wizard_metadata->is_wrong_edition_page_enabled)
+    {
+      return WRONG_EDITION_PAGE_INDEX;
+    }
   case MIGRATE_PAGE_INDEX:
-    if (metadata->is_migrate_page_enabled)
+    if (wizard_metadata->is_migrate_page_enabled)
     {
       return MIGRATE_PAGE_INDEX;
     }
+  case AUTO_START_PAGE_INDEX:
+    if (wizard_metadata->is_auto_start_page_enabled)
+    {
+      return AUTO_START_PAGE_INDEX;
+    }
   case ADD_PATH_PAGE_INDEX:
-    if (metadata->is_add_path_page_enabled)
+    if (wizard_metadata->is_add_path_page_enabled)
     {
       return ADD_PATH_PAGE_INDEX;
     }
   case ACCESSIBILITY_PAGE_INDEX:
-    if (metadata->is_accessibility_page_enabled)
+    if (wizard_metadata->is_accessibility_page_enabled)
     {
       return ACCESSIBILITY_PAGE_INDEX;
     }
@@ -98,6 +111,11 @@ protected:
   void welcome_start_clicked(wxCommandEvent &event);
   void migrate_button_clicked(wxCommandEvent &event);
   void migrate_compatibility_mode_clicked(wxCommandEvent &event);
+	void auto_start_continue_clicked( wxCommandEvent& event );
+	void add_path_continue_clicked( wxCommandEvent& event );
+	void accessibility_enable_clicked( wxCommandEvent& event );
+	void quit_espanso_clicked( wxCommandEvent& event );
+	void move_bundle_quit_clicked( wxCommandEvent& event );
 
   void navigate_to_next_page_or_close();
   void change_default_button(int target_page);
@@ -109,15 +127,38 @@ public:
 DerivedFrame::DerivedFrame(wxWindow *parent)
     : WizardFrame(parent)
 {
-  // TODO: load images for accessibility page if on macOS
+  // Welcome images
 
-  if (metadata->welcome_image_path)
+  if (wizard_metadata->welcome_image_path)
   {
-    wxBitmap welcomeBitmap = wxBitmap(metadata->welcome_image_path, wxBITMAP_TYPE_PNG);
+    wxBitmap welcomeBitmap = wxBitmap(wxString::FromUTF8(wizard_metadata->welcome_image_path), wxBITMAP_TYPE_PNG);
     this->welcome_image->SetBitmap(welcomeBitmap);
   }
 
-  this->welcome_version_text->SetLabel(wxString::Format("( version %s )", metadata->version));
+  this->welcome_version_text->SetLabel(wxString::Format("( version %s )", wizard_metadata->version));
+
+  // Accessiblity images
+
+  if (wizard_metadata->accessibility_image_1_path)
+  {
+    wxBitmap accessiblityImage1 = wxBitmap(wxString::FromUTF8(wizard_metadata->accessibility_image_1_path), wxBITMAP_TYPE_PNG);
+    this->accessibility_image1->SetBitmap(accessiblityImage1);
+  }
+  if (wizard_metadata->accessibility_image_2_path)
+  {
+    wxBitmap accessiblityImage2 = wxBitmap(wxString::FromUTF8(wizard_metadata->accessibility_image_2_path), wxBITMAP_TYPE_PNG);
+    this->accessibility_image2->SetBitmap(accessiblityImage2);
+  }
+
+  // Wrong edition
+  if (wizard_metadata->is_wrong_edition_page_enabled) {
+    if (wizard_metadata->detected_os == DETECTED_OS_X11) {
+      this->wrong_edition_description_x11->Hide();
+    }
+    if (wizard_metadata->detected_os == DETECTED_OS_WAYLAND) {
+      this->wrong_edition_description_wayland->Hide();
+    }
+  }
 
   // Load the first page
   int page = find_next_page(-1);
@@ -142,6 +183,11 @@ void DerivedFrame::navigate_to_next_page_or_close()
   }
   else
   {
+    if (wizard_metadata->on_completed) {
+      wizard_metadata->on_completed();
+      completed_successfully = 1;
+    }
+
     Close(true);
   }
 }
@@ -158,9 +204,9 @@ void DerivedFrame::migrate_compatibility_mode_clicked(wxCommandEvent &event)
 
 void DerivedFrame::migrate_button_clicked(wxCommandEvent &event)
 {
-  if (metadata->backup_and_migrate)
+  if (wizard_metadata->backup_and_migrate)
   {
-    int result = metadata->backup_and_migrate();
+    int result = wizard_metadata->backup_and_migrate();
     if (result == MIGRATE_RESULT_SUCCESS)
     {
       this->navigate_to_next_page_or_close();
@@ -180,13 +226,109 @@ void DerivedFrame::migrate_button_clicked(wxCommandEvent &event)
   }
 }
 
+void DerivedFrame::auto_start_continue_clicked( wxCommandEvent& event ) {
+  if (!auto_start_checkbox->IsChecked()) {
+    if (wizard_metadata->auto_start)
+    {
+      wizard_metadata->auto_start(0);
+    }
+    this->navigate_to_next_page_or_close();
+    return;
+  } 
+
+  if (wizard_metadata->auto_start)
+  {
+    while (true) {
+      int result = wizard_metadata->auto_start(1);
+      if (result == 1)
+      {
+        this->navigate_to_next_page_or_close();
+        return;
+      }
+      else 
+      {
+        wxMessageDialog* dialog = new wxMessageDialog(this,
+          "An error occurred while registering Espanso as a service, please check the logs for more information.\nDo you want to retry? You can always configure this option later",
+          "Operation failed",
+          wxCENTER | wxOK_DEFAULT | wxOK | wxCANCEL |
+          wxICON_EXCLAMATION);
+
+        dialog->SetOKLabel("Retry");
+
+        int prompt_result = dialog->ShowModal(); 
+        if (prompt_result == wxID_CANCEL) {
+          this->navigate_to_next_page_or_close();
+          break;
+        }
+      }
+    }
+  }
+}
+
+void DerivedFrame::add_path_continue_clicked( wxCommandEvent& event ) {
+  if (!add_path_checkbox->IsChecked()) {
+    this->navigate_to_next_page_or_close();
+    return;
+  } 
+
+  if (wizard_metadata->add_to_path)
+  {
+    while (true) {
+      int result = wizard_metadata->add_to_path();
+      if (result == 1)
+      {
+        this->navigate_to_next_page_or_close();
+        return;
+      }
+      else 
+      {
+        wxMessageDialog* dialog = new wxMessageDialog(this,
+          "An error occurred while registering the 'espanso' command to the PATH, please check the logs for more information.\nDo you want to retry? You can always add espanso to the PATH later",
+          "Operation failed",
+          wxCENTER | wxOK_DEFAULT | wxOK | wxCANCEL |
+          wxICON_EXCLAMATION);
+
+        dialog->SetOKLabel("Retry");
+
+        int prompt_result = dialog->ShowModal(); 
+        if (prompt_result == wxID_CANCEL) {
+          this->navigate_to_next_page_or_close();
+          break;
+        }
+      }
+    }
+  }
+}
+
+
+void DerivedFrame::accessibility_enable_clicked( wxCommandEvent& event )
+{
+  if (wizard_metadata->enable_accessibility)
+  {
+    wizard_metadata->enable_accessibility();
+  }
+}
+
+void DerivedFrame::quit_espanso_clicked( wxCommandEvent& event )
+{
+  Close(true);
+}
+
 void DerivedFrame::check_timer_tick(wxTimerEvent &event)
 {
   if (this->m_simplebook->GetSelection() == LEGACY_VERSION_PAGE_INDEX)
   {
-    if (metadata->is_legacy_version_running)
+    if (wizard_metadata->is_legacy_version_running)
     {
-      if (metadata->is_legacy_version_running() == 0)
+      if (wizard_metadata->is_legacy_version_running() == 0)
+      {
+        this->navigate_to_next_page_or_close();
+      }
+    }
+  } else if (this->m_simplebook->GetSelection() == ACCESSIBILITY_PAGE_INDEX) {
+    if (wizard_metadata->is_accessibility_enabled)
+    {
+      if (wizard_metadata->is_accessibility_enabled() == 1)
       {
         this->navigate_to_next_page_or_close();
       }
@@ -232,14 +374,19 @@ void DerivedFrame::change_default_button(int target_page)
   }
 }
 
+void DerivedFrame::move_bundle_quit_clicked( wxCommandEvent& event )
+{
+  Close(true);
+}
+
 bool WizardApp::OnInit()
 {
   wxInitAllImageHandlers();
   DerivedFrame *frame = new DerivedFrame(NULL);
 
-  if (metadata->window_icon_path)
+  if (wizard_metadata->window_icon_path)
   {
-    setFrameIcon(metadata->window_icon_path, frame);
+    setFrameIcon(wxString::FromUTF8(wizard_metadata->window_icon_path), frame);
   }
 
   frame->Show(true);
@@ -249,16 +396,18 @@ bool WizardApp::OnInit()
   return true;
 }
 
-extern "C" void interop_show_wizard(WizardMetadata *_metadata)
+extern "C" int interop_show_wizard(WizardMetadata *_metadata)
 {
 // Setup high DPI support on Windows
 #ifdef __WXMSW__
   SetProcessDPIAware();
 #endif
 
-  metadata = _metadata;
+  wizard_metadata = _metadata;
 
   wxApp::SetInstance(new WizardApp());
   int argc = 0;
   wxEntry(argc, (char **)nullptr);
+
+  return completed_successfully;
 }

@@ -18,31 +18,48 @@
  */
 
 use anyhow::Result;
+use indoc::formatdoc;
+use std::sync::Arc;
 use std::{collections::HashSet, path::Path};
 use thiserror::Error;
 
+pub(crate) mod default;
 mod parse;
 mod path;
 mod resolve;
-mod util;
-pub(crate) mod default;
 pub(crate) mod store;
+mod util;
 
 #[cfg(test)]
 use mockall::{automock, predicate::*};
+
+use crate::error::NonFatalErrorSet;
 #[cfg_attr(test, automock)]
-pub trait Config: Send {
+pub trait Config: Send + Sync {
   fn id(&self) -> i32;
   fn label(&self) -> &str;
   fn match_paths(&self) -> &[String];
+
+  // The mechanism used to perform the injection. Espanso can either
+  // inject text by simulating keypresses (Inject backend) or
+  // by using the clipboard (Clipboard backend). Both of them have pros
+  // and cons, so the "Auto" backend is used by default to automatically
+  // choose the most appropriate one based on the situation.
+  // If for whatever reason the Auto backend is not appropriate, you
+  // can change this option to override it.
   fn backend(&self) -> Backend;
+
+  // If false, espanso will be disabled for the current configuration.
+  // This option can be used to selectively disable espanso when
+  // using a specific application (by creating an app-specific config).
+  fn enable(&self) -> bool;
 
   // Number of chars after which a match is injected with the clipboard
   // backend instead of the default one. This is done for efficiency
-  // reasons, as injecting a long match through separate events becomes 
+  // reasons, as injecting a long match through separate events becomes
   // slow for long strings.
   fn clipboard_threshold(&self) -> usize;
-  
+
   // Delay (in ms) that espanso should wait to trigger the paste shortcut
   // after copying the content in the clipboard. This is needed because
   // if we trigger a "paste" shortcut before the content is actually
@@ -91,6 +108,12 @@ pub trait Config: Send {
   // application is missing some key events.
   fn key_delay(&self) -> Option<usize>;
 
+  // Extra delay to apply when injecting modifiers under the EVDEV backend.
+  // This is useful on Wayland if espanso is injecting seemingly random
+  // cased letters, for example "Hi theRE1" instead of "Hi there!".
+  // Increase if necessary, decrease to speed up the injection.
+  fn evdev_modifier_delay(&self) -> Option<usize>;
+
   // Chars that when pressed mark the start and end of a word.
   // Examples of this are . or ,
   fn word_separators(&self) -> Vec<String>;
@@ -100,13 +123,119 @@ pub trait Config: Send {
   // are typed.
   fn backspace_limit(&self) -> usize;
 
+  // If false, avoid applying the built-in patches to the current config.
+  fn apply_patch(&self) -> bool;
+
+  // On Wayland, overrides the auto-detected keyboard configuration (RMLVO)
+  // which is used both for the detection and injection process.
+  fn keyboard_layout(&self) -> Option<RMLVOConfig>;
+
+  // Trigger used to show the Search UI
+  fn search_trigger(&self) -> Option<String>;
+
+  // Hotkey used to trigger the Search UI
+  fn search_shortcut(&self) -> Option<String>;
+
+  // When enabled, espanso automatically "reverts" an expansion if the user
+  // presses the Backspace key afterwards.
+  fn undo_backspace(&self) -> bool;
+
+  // If false, disable all notifications
+  fn show_notifications(&self) -> bool;
+
+  // If false, avoid showing the espanso icon on the system's tray bar
+  // Note: currently not working on Linux
+  fn show_icon(&self) -> bool;
+
+  // If false, avoid showing the SecureInput notification on macOS
+  fn secure_input_notification(&self) -> bool;
+
+  // If true, filter out keyboard events without an explicit HID device source on Windows.
+  // This is needed to filter out the software-generated events, including
+  // those from espanso, but might need to be disabled when using some software-level keyboards.
+  // Disabling this option might conflict with the undo feature.
+  fn win32_exclude_orphan_events(&self) -> bool;
+
+  // The maximum interval (in milliseconds) for which a keyboard layout
+  // can be cached. If switching often between different layouts, you
+  // could lower this amount to avoid the "lost detection" effect described
+  // in this issue: https://github.com/federico-terzi/espanso/issues/745
+  fn win32_keyboard_layout_cache_interval(&self) -> i64;
+
   fn is_match<'a>(&self, app: &AppProperties<'a>) -> bool;
+
+  fn pretty_dump(&self) -> String {
+    formatdoc! {"
+        [espanso config: {:?}]
+
+        backend: {:?}
+        enable: {:?}
+        paste_shortcut: {:?}
+        inject_delay: {:?}
+        key_delay: {:?}
+        apply_patch: {:?}
+        word_separators: {:?}
+        
+        preserve_clipboard: {:?}
+        clipboard_threshold: {:?}
+        disable_x11_fast_inject: {}
+        pre_paste_delay: {}
+        paste_shortcut_event_delay: {}
+        toggle_key: {:?}
+        auto_restart: {:?}
+        restore_clipboard_delay: {:?} 
+        backspace_limit: {}
+        search_trigger: {:?}
+        search_shortcut: {:?}
+        keyboard_layout: {:?}
+
+        show_icon: {:?}
+        show_notifications: {:?}
+        secure_input_notification: {:?}
+
+        win32_exclude_orphan_events: {:?}
+        win32_keyboard_layout_cache_interval: {:?}
+
+        match_paths: {:#?}
+      ", 
+      self.label(),
+      self.backend(),
+      self.enable(),
+      self.paste_shortcut(),
+      self.inject_delay(),
+      self.key_delay(),
+      self.apply_patch(),
+      self.word_separators(),
+
+      self.preserve_clipboard(),
+      self.clipboard_threshold(),
+      self.disable_x11_fast_inject(),
+      self.pre_paste_delay(),
+      self.paste_shortcut_event_delay(),
+      self.toggle_key(),
+      self.auto_restart(),
+      self.restore_clipboard_delay(),
+      self.backspace_limit(),
+      self.search_trigger(),
+      self.search_shortcut(),
+      self.keyboard_layout(),
+
+      self.show_icon(),
+      self.show_notifications(),
+      self.secure_input_notification(),
+
+      self.win32_exclude_orphan_events(),
+      self.win32_keyboard_layout_cache_interval(),
+
+      self.match_paths(),
+    }
+  }
 }
 
 pub trait ConfigStore: Send {
-  fn default(&self) -> &dyn Config;
-  fn active<'a>(&'a self, app: &AppProperties) -> &'a dyn Config;
-  fn configs(&self) -> Vec<&dyn Config>;
+  fn default(&self) -> Arc<dyn Config>;
+  fn active<'a>(&'a self, app: &AppProperties) -> Arc<dyn Config>;
+  fn configs(&self) -> Vec<Arc<dyn Config>>;
 
   fn get_all_match_paths(&self) -> HashSet<String>;
 }
@@ -124,7 +253,6 @@ pub enum Backend {
   Auto,
 }
 
-
 #[derive(Debug, Copy, Clone)]
 pub enum ToggleKey {
   Ctrl,
@@ -141,7 +269,30 @@ pub enum ToggleKey {
   LeftMeta,
 }
 
-pub fn load_store(config_dir: &Path) -> Result<impl ConfigStore> {
+#[derive(Debug, Clone, Default)]
+pub struct RMLVOConfig {
+  pub rules: Option<String>,
+  pub model: Option<String>,
+  pub layout: Option<String>,
+  pub variant: Option<String>,
+  pub options: Option<String>,
+}
+
+impl std::fmt::Display for RMLVOConfig {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    write!(
+      f,
+      "[R={}, M={}, L={}, V={}, O={}]",
+      self.rules.as_deref().unwrap_or_default(),
+      self.model.as_deref().unwrap_or_default(),
+      self.layout.as_deref().unwrap_or_default(),
+      self.variant.as_deref().unwrap_or_default(),
+      self.options.as_deref().unwrap_or_default(),
+    )
+  }
+}
+
+pub fn load_store(config_dir: &Path) -> Result<(impl ConfigStore, Vec<NonFatalErrorSet>)> {
   store::DefaultConfigStore::load(config_dir)
 }
 

@@ -18,7 +18,7 @@
  */
 
 use anyhow::Result;
-use std::{convert::TryInto, path::Path};
+use std::{collections::BTreeMap, convert::TryInto, path::Path};
 use thiserror::Error;
 
 mod yaml;
@@ -28,6 +28,7 @@ pub(crate) struct ParsedConfig {
   pub label: Option<String>,
 
   pub backend: Option<String>,
+  pub enable: Option<bool>,
   pub clipboard_threshold: Option<usize>,
   pub auto_restart: Option<bool>,
   pub preserve_clipboard: Option<bool>,
@@ -36,13 +37,23 @@ pub(crate) struct ParsedConfig {
   pub disable_x11_fast_inject: Option<bool>,
   pub word_separators: Option<Vec<String>>,
   pub backspace_limit: Option<usize>,
+  pub apply_patch: Option<bool>,
+  pub search_trigger: Option<String>,
+  pub search_shortcut: Option<String>,
+  pub undo_backspace: Option<bool>,
+  pub show_notifications: Option<bool>,
+  pub show_icon: Option<bool>,
+  pub secure_input_notification: Option<bool>,
+  pub win32_exclude_orphan_events: Option<bool>,
+  pub win32_keyboard_layout_cache_interval: Option<i64>,
 
   pub pre_paste_delay: Option<usize>,
   pub restore_clipboard_delay: Option<usize>,
   pub paste_shortcut_event_delay: Option<usize>,
   pub inject_delay: Option<usize>,
   pub key_delay: Option<usize>,
-
+  pub keyboard_layout: Option<BTreeMap<String, String>>,
+  pub evdev_modifier_delay: Option<usize>,
 
   // Includes
   pub includes: Option<Vec<String>>,

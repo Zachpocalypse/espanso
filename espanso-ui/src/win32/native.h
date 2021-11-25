@@ -29,13 +29,13 @@
 
 #define UI_EVENT_TYPE_ICON_CLICK 1
 #define UI_EVENT_TYPE_CONTEXT_MENU_CLICK 2
+#define UI_EVENT_TYPE_HEARTBEAT 3
 
 typedef struct {
   int32_t show_icon;
 
   wchar_t icon_paths[MAX_ICON_COUNT][MAX_FILE_PATH];
   int32_t icon_paths_count;
-  wchar_t notification_icon_path[MAX_FILE_PATH];
 } UIOptions;
 
 typedef struct {
@@ -60,9 +60,6 @@ extern "C" void ui_exit(void * window);
 // Updates the tray icon to the given one. The method accepts an index that refers to
 // the icon within the UIOptions.icon_paths array.
 extern "C" void ui_update_tray_icon(void * window, int32_t index);
-
-// Show a native Windows 10 notification
-extern "C" int32_t ui_show_notification(void * window, wchar_t * message);
 
 // Display the context menu on the tray icon.
 // Payload is passed as JSON as given the complex structure, parsing

@@ -85,11 +85,45 @@ fn get_app_name_from_path(path: &str) -> Option<String> {
     static ref APP_REGEX: Regex = Regex::new("/([^/]+).(app|bundle)/").unwrap();
   };
 
-  let caps = APP_REGEX.captures(&path);
-  if let Some(caps) = caps {
-    Some(caps.get(1).map_or("", |m| m.as_str()).to_owned())
-  } else {
-    None
+  let caps = APP_REGEX.captures(path);
+  caps.map(|caps| caps.get(1).map_or("", |m| m.as_str()).to_owned())
+}
+
+#[cfg(target_os = "macos")]
+pub fn check_accessibility() -> bool {
+  unsafe { ffi::mac_utils_check_accessibility() > 0 }
+}
+
+#[cfg(target_os = "macos")]
+pub fn prompt_accessibility() -> bool {
+  unsafe { ffi::mac_utils_prompt_accessibility() > 0 }
+}
+
+#[cfg(target_os = "macos")]
+pub fn convert_to_foreground_app() {
+  unsafe {
+    ffi::mac_utils_transition_to_foreground_app();
+  }
+}
+
+#[cfg(target_os = "macos")]
+pub fn convert_to_background_app() {
+  unsafe {
+    ffi::mac_utils_transition_to_background_app();
+  }
+}
+
+#[cfg(target_os = "macos")]
+pub fn start_headless_eventloop() {
+  unsafe {
+    ffi::mac_utils_start_headless_eventloop();
+  }
+}
+
+#[cfg(target_os = "macos")]
+pub fn exit_headless_eventloop() {
+  unsafe {
+    ffi::mac_utils_exit_headless_eventloop();
   }
 }
 

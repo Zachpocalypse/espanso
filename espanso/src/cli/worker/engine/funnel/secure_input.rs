@@ -19,12 +19,10 @@
 
 use crossbeam::channel::{Receiver, Select, SelectedOperation};
 
-use crate::{
-  cli::worker::secure_input::SecureInputEvent,
-  engine::{
-    event::{internal::SecureInputEnabledEvent, Event, EventType},
-    funnel,
-  },
+use crate::cli::worker::secure_input::SecureInputEvent;
+use espanso_engine::{
+  event::{internal::SecureInputEnabledEvent, Event, EventType},
+  funnel,
 };
 
 use super::sequencer::Sequencer;
@@ -45,34 +43,22 @@ impl<'a> SecureInputSource<'a> {
 
 impl<'a> funnel::Source<'a> for SecureInputSource<'a> {
   fn register(&'a self, select: &mut Select<'a>) -> usize {
-    if cfg!(target_os = "macos") {
-      select.recv(&self.receiver)
-    } else {
-      999999
-    }
+    select.recv(&self.receiver)
   }
 
-  fn receive(&self, op: SelectedOperation) -> Event {
-    if cfg!(target_os = "macos") {
-      let si_event = op
-        .recv(&self.receiver)
-        .expect("unable to select data from SecureInputSource receiver");
+  fn receive(&self, op: SelectedOperation) -> Option<Event> {
+    let si_event = op
+      .recv(&self.receiver)
+      .expect("unable to select data from SecureInputSource receiver");
 
-      Event {
-        source_id: self.sequencer.next_id(),
-        etype: match si_event {
-          SecureInputEvent::Disabled => EventType::SecureInputDisabled,
-          SecureInputEvent::Enabled { app_name, app_path } => {
-            EventType::SecureInputEnabled(SecureInputEnabledEvent { app_name, app_path })
-          }
-        },
-      }
-    } else {
-      println!("noop");
-      Event {
-        source_id: self.sequencer.next_id(),
-        etype: EventType::NOOP,
-      }
-    }
+    Some(Event {
+      source_id: self.sequencer.next_id(),
+      etype: match si_event {
+        SecureInputEvent::Disabled => EventType::SecureInputDisabled,
+        SecureInputEvent::Enabled { app_name, app_path } => {
+          EventType::SecureInputEnabled(SecureInputEnabledEvent { app_name, app_path })
+        }
+      },
+    })
   }
 }

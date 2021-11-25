@@ -60,6 +60,12 @@ typedef struct {
 
   // Pressed or Released status
   int32_t status;
+
+  // Only relevant for keyboard events, this is set to 1
+  // if a keyboard event has an explicit source, 0 otherwise.
+  // This is needed to filter out software generated events,
+  // including those from espanso.
+  int32_t has_known_source;
 } InputEvent;
 
 typedef struct {
@@ -70,9 +76,12 @@ typedef struct {
 
 typedef void (*EventCallback)(void * rust_istance, InputEvent data);
 
+typedef struct {
+  long keyboard_layout_cache_interval;
+} InitOptions;
 
 // Initialize the Raw Input API and the Window.
-extern "C" void * detect_initialize(void * rust_istance, int32_t *error_code);
+extern "C" void * detect_initialize(void * rust_istance, InitOptions * options, int32_t *error_code);
 
 // Register the given hotkey, return a non-zero code if successful
 extern "C" int32_t detect_register_hotkey(void * window, HotKey hotkey);

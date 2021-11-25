@@ -80,13 +80,13 @@ WizardFrame::WizardFrame( wxWindow* parent, wxWindowID id, const wxString& title
 	bSizer22->Add( 0, 20, 0, 0, 5 );
 
 	move_bundle_description = new wxStaticText( move_bundle_panel, wxID_ANY, wxT("Espanso is being run from outside the Applications directory, which prevents it from working correctly.\n\nPlease move the Espanso.app bundle inside your Applications folder and start it again.\n"), wxDefaultPosition, wxDefaultSize, 0 );
-	move_bundle_description->Wrap( -1 );
+	move_bundle_description->Wrap( 500 );
 	bSizer22->Add( move_bundle_description, 0, wxALL, 10 );
 
 
 	bSizer22->Add( 0, 20, 1, wxEXPAND, 5 );
 
-	move_bundle_quit_button = new wxButton( move_bundle_panel, wxID_ANY, wxT("Start"), wxDefaultPosition, wxDefaultSize, 0 );
+	move_bundle_quit_button = new wxButton( move_bundle_panel, wxID_ANY, wxT("Quit"), wxDefaultPosition, wxDefaultSize, 0 );
 
 	move_bundle_quit_button->SetDefault();
 	bSizer22->Add( move_bundle_quit_button, 0, wxALIGN_RIGHT|wxALL, 10 );
@@ -111,11 +111,11 @@ WizardFrame::WizardFrame( wxWindow* parent, wxWindowID id, const wxString& title
 
 	bSizer21->Add( 0, 20, 0, 0, 5 );
 
-	legacy_version_description = new wxStaticText( legacy_version_panel, wxID_ANY, wxT("A legacy espanso process has been detected and prevents the new version from working correctly.\n\nPlease terminate and uninstall the old espanso version to proceed.\n\nFor more information, see: "), wxDefaultPosition, wxDefaultSize, 0 );
+	legacy_version_description = new wxStaticText( legacy_version_panel, wxID_ANY, wxT("A legacy espanso process has been detected and prevents the new version from working correctly.\n\nPlease terminate and uninstall the old espanso version to proceed.\n\nIf you already uninstalled the previous version, you might need to restart your computer for changes to be detected.\n\nFor more information, see: "), wxDefaultPosition, wxDefaultSize, 0 );
 	legacy_version_description->Wrap( 500 );
 	bSizer21->Add( legacy_version_description, 0, wxLEFT|wxRIGHT|wxTOP, 10 );
 
-	legacy_version_docs_link = new wxHyperlinkCtrl( legacy_version_panel, wxID_ANY, wxT("https://espanso.org/migration#uninstall"), wxT("https://espanso.org/migration#uninstall"), wxDefaultPosition, wxDefaultSize, wxHL_DEFAULT_STYLE );
+	legacy_version_docs_link = new wxHyperlinkCtrl( legacy_version_panel, wxID_ANY, wxT("https://espanso.org/legacy/uninstall"), wxT("https://espanso.org/legacy/uninstall"), wxDefaultPosition, wxDefaultSize, wxHL_DEFAULT_STYLE );
 	bSizer21->Add( legacy_version_docs_link, 0, wxLEFT|wxRIGHT, 10 );
 
 
@@ -133,6 +133,45 @@ WizardFrame::WizardFrame( wxWindow* parent, wxWindowID id, const wxString& title
 	legacy_version_panel->Layout();
 	bSizer21->Fit( legacy_version_panel );
 	m_simplebook->AddPage( legacy_version_panel, wxT("a page"), false );
+	wrong_edition_panel = new wxPanel( m_simplebook, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL );
+	wrong_edition_panel->SetBackgroundColour( wxSystemSettings::GetColour( wxSYS_COLOUR_WINDOW ) );
+
+	wxBoxSizer* bSizer213;
+	bSizer213 = new wxBoxSizer( wxVERTICAL );
+
+	wrong_edition_title = new wxStaticText( wrong_edition_panel, wxID_ANY, wxT("Incompatibility detected"), wxDefaultPosition, wxDefaultSize, 0 );
+	wrong_edition_title->Wrap( -1 );
+	wrong_edition_title->SetFont( wxFont( 18, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD, false, wxEmptyString ) );
+
+	bSizer213->Add( wrong_edition_title, 0, wxALIGN_CENTER_HORIZONTAL|wxALIGN_LEFT|wxTOP, 20 );
+
+
+	bSizer213->Add( 0, 20, 0, 0, 5 );
+
+	wrong_edition_description_x11 = new wxStaticText( wrong_edition_panel, wxID_ANY, wxT("This version of espanso was compiled to support X11-based systems, but it seems you are on a Wayland-based desktop environment.\n\nUnfortunately, the two versions are incompatible. To use espanso, either switch to an X11-based environment or download the Wayland version from the website.\n\nFor more information:"), wxDefaultPosition, wxDefaultSize, 0 );
+	wrong_edition_description_x11->Wrap( 500 );
+	bSizer213->Add( wrong_edition_description_x11, 0, wxEXPAND|wxLEFT|wxRIGHT|wxTOP, 10 );
+
+	wrong_edition_description_wayland = new wxStaticText( wrong_edition_panel, wxID_ANY, wxT("This version of espanso was compiled to support Wayland-based systems, but it seems you are on a X11-based desktop environment.\n\nUnfortunately, the two versions are incompatible. To use espanso, either switch to a Wayland-based environment or download the X11 version from the website.\n\nFor more information:"), wxDefaultPosition, wxDefaultSize, 0 );
+	wrong_edition_description_wayland->Wrap( 500 );
+	bSizer213->Add( wrong_edition_description_wayland, 0, wxEXPAND|wxLEFT|wxTOP, 10 );
+
+	wrong_edition_link = new wxHyperlinkCtrl( wrong_edition_panel, wxID_ANY, wxT("https://espanso.org/install"), wxT("https://espanso.org/install"), wxDefaultPosition, wxDefaultSize, wxHL_DEFAULT_STYLE );
+	bSizer213->Add( wrong_edition_link, 0, wxLEFT|wxRIGHT, 10 );
+
+
+	bSizer213->Add( 0, 0, 1, wxEXPAND, 5 );
+
+	wrong_edition_button = new wxButton( wrong_edition_panel, wxID_ANY, wxT("Quit Espanso"), wxDefaultPosition, wxDefaultSize, 0 );
+
+	wrong_edition_button->SetDefault();
+	bSizer213->Add( wrong_edition_button, 0, wxALIGN_RIGHT|wxALL, 10 );
+
+
+	wrong_edition_panel->SetSizer( bSizer213 );
+	wrong_edition_panel->Layout();
+	bSizer213->Fit( wrong_edition_panel );
+	m_simplebook->AddPage( wrong_edition_panel, wxT("a page"), false );
 	migrate_panel = new wxPanel( m_simplebook, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL );
 	migrate_panel->SetBackgroundColour( wxSystemSettings::GetColour( wxSYS_COLOUR_WINDOW ) );
 
@@ -180,6 +219,46 @@ WizardFrame::WizardFrame( wxWindow* parent, wxWindowID id, const wxString& title
 	migrate_panel->Layout();
 	bSizer211->Fit( migrate_panel );
 	m_simplebook->AddPage( migrate_panel, wxT("a page"), false );
+	auto_start_panel = new wxPanel( m_simplebook, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL );
+	auto_start_panel->SetBackgroundColour( wxSystemSettings::GetColour( wxSYS_COLOUR_WINDOW ) );
+
+	wxBoxSizer* bSizer2122;
+	bSizer2122 = new wxBoxSizer( wxVERTICAL );
+
+	auto_start_title = new wxStaticText( auto_start_panel, wxID_ANY, wxT("Launch on System startup"), wxDefaultPosition, wxDefaultSize, 0 );
+	auto_start_title->Wrap( -1 );
+	auto_start_title->SetFont( wxFont( 18, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD, false, wxEmptyString ) );
+
+	bSizer2122->Add( auto_start_title, 0, wxALIGN_CENTER_HORIZONTAL|wxALIGN_LEFT|wxTOP, 20 );
+
+
+	bSizer2122->Add( 0, 20, 0, 0, 5 );
+
+	auto_start_description = new wxStaticText( auto_start_panel, wxID_ANY, wxT("Espanso can be launched automatically when you start your PC. \n\nDo you want to proceed?"), wxDefaultPosition, wxDefaultSize, 0 );
+	auto_start_description->Wrap( 500 );
+	bSizer2122->Add( auto_start_description, 0, wxLEFT|wxRIGHT|wxTOP, 10 );
+
+	auto_start_checkbox = new wxCheckBox( auto_start_panel, wxID_ANY, wxT("Yes, launch Espanso on system startup (recommended)"), wxDefaultPosition, wxDefaultSize, 0 );
+	auto_start_checkbox->SetValue(true);
+	bSizer2122->Add( auto_start_checkbox, 0, wxALL, 20 );
+
+	auto_start_note = new wxStaticText( auto_start_panel, wxID_ANY, wxT("Note: you can always disable this option later."), wxDefaultPosition, wxDefaultSize, 0 );
+	auto_start_note->Wrap( 500 );
+	bSizer2122->Add( auto_start_note, 0, wxALL, 10 );
+
+
+	bSizer2122->Add( 0, 0, 1, wxEXPAND, 5 );
+
+	auto_start_continue = new wxButton( auto_start_panel, wxID_ANY, wxT("Continue"), wxDefaultPosition, wxDefaultSize, 0 );
+
+	auto_start_continue->SetDefault();
+	bSizer2122->Add( auto_start_continue, 0, wxALIGN_RIGHT|wxALL, 10 );
+
+
+	auto_start_panel->SetSizer( bSizer2122 );
+	auto_start_panel->Layout();
+	bSizer2122->Fit( auto_start_panel );
+	m_simplebook->AddPage( auto_start_panel, wxT("a page"), false );
 	add_path_panel = new wxPanel( m_simplebook, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL );
 	add_path_panel->SetBackgroundColour( wxSystemSettings::GetColour( wxSYS_COLOUR_WINDOW ) );
 
@@ -284,8 +363,10 @@ WizardFrame::WizardFrame( wxWindow* parent, wxWindowID id, const wxString& title
 	m_simplebook->Connect( wxEVT_COMMAND_BOOKCTRL_PAGE_CHANGED, wxBookCtrlEventHandler( WizardFrame::on_page_changed ), NULL, this );
 	welcome_start_button->Connect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::welcome_start_clicked ), NULL, this );
 	move_bundle_quit_button->Connect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::move_bundle_quit_clicked ), NULL, this );
+	wrong_edition_button->Connect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::quit_espanso_clicked ), NULL, this );
 	migrate_compatibility_mode_button->Connect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::migrate_compatibility_mode_clicked ), NULL, this );
 	migrate_backup_and_migrate_button->Connect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::migrate_button_clicked ), NULL, this );
+	auto_start_continue->Connect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::auto_start_continue_clicked ), NULL, this );
 	add_path_continue_button->Connect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::add_path_continue_clicked ), NULL, this );
 	accessibility_enable_button->Connect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::accessibility_enable_clicked ), NULL, this );
 }
@@ -297,8 +378,10 @@ WizardFrame::~WizardFrame()
 	m_simplebook->Disconnect( wxEVT_COMMAND_BOOKCTRL_PAGE_CHANGED, wxBookCtrlEventHandler( WizardFrame::on_page_changed ), NULL, this );
 	welcome_start_button->Disconnect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::welcome_start_clicked ), NULL, this );
 	move_bundle_quit_button->Disconnect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::move_bundle_quit_clicked ), NULL, this );
+	wrong_edition_button->Disconnect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::quit_espanso_clicked ), NULL, this );
 	migrate_compatibility_mode_button->Disconnect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::migrate_compatibility_mode_clicked ), NULL, this );
 	migrate_backup_and_migrate_button->Disconnect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::migrate_button_clicked ), NULL, this );
+	auto_start_continue->Disconnect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::auto_start_continue_clicked ), NULL, this );
 	add_path_continue_button->Disconnect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::add_path_continue_clicked ), NULL, this );
 	accessibility_enable_button->Disconnect( wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler( WizardFrame::accessibility_enable_clicked ), NULL, this );
 

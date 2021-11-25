@@ -17,12 +17,12 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{path::PathBuf, sync::Mutex};
+use std::path::PathBuf;
 
 use crate::{
   exit_code::{
-    MIGRATE_ALREADY_NEW_FORMAT, MIGRATE_CLEAN_FAILURE, MIGRATE_DIRTY_FAILURE,
-    MIGRATE_LEGACY_INSTANCE_RUNNING, MIGRATE_SUCCESS, MIGRATE_UNEXPECTED_FAILURE,
+    configure_custom_panic_hook, update_panic_exit_code, MIGRATE_ALREADY_NEW_FORMAT,
+    MIGRATE_CLEAN_FAILURE, MIGRATE_DIRTY_FAILURE, MIGRATE_LEGACY_INSTANCE_RUNNING, MIGRATE_SUCCESS,
     MIGRATE_USER_ABORTED,
   },
   lock::acquire_legacy_lock,
@@ -34,10 +34,6 @@ use dialoguer::Confirm;
 use fs_extra::dir::CopyOptions;
 use log::{error, info};
 use tempdir::TempDir;
-
-lazy_static! {
-  static ref CURRENT_PANIC_EXIT_CODE: Mutex<i32> = Mutex::new(MIGRATE_UNEXPECTED_FAILURE);
-}
 
 pub fn new() -> CliModule {
   CliModule {
@@ -78,7 +74,7 @@ fn migrate_main(args: CliModuleArgs) -> i32 {
 
   println!("\n{}\n", "Welcome to espanso v2!".bold());
   println!("This migration tool will help you to smoothly transition to the new espanso v2 configuration format.");
-  println!("");
+  println!();
   println!(
     "1. Firstly, espanso will {} your current configuration, located in:\n",
     "backup".green().bold()
@@ -91,7 +87,7 @@ fn migrate_main(args: CliModuleArgs) -> i32 {
     "convert".bold().green()
   );
   println!("   the current content of the config directory.");
-  println!("");
+  println!();
 
   info!(
     "backing up the configuration directory: '{}'",
@@ -102,15 +98,14 @@ fn migrate_main(args: CliModuleArgs) -> i32 {
     target_backup_dir.to_string_lossy()
   );
 
-  if !cli_args.is_present("noconfirm") {
-    if !Confirm::new()
+  if !cli_args.is_present("noconfirm")
+    && !Confirm::new()
       .with_prompt("Do you want to proceed?")
       .default(true)
       .interact()
       .expect("unable to read choice")
-    {
-      return MIGRATE_USER_ABORTED;
-    }
+  {
+    return MIGRATE_USER_ABORTED;
   }
 
   println!("Backing up your configuration...");
@@ -146,12 +141,18 @@ fn migrate_main(args: CliModuleArgs) -> i32 {
     fs_extra::dir::get_dir_content(&paths.config).expect("unable to list legacy dir files");
   to_be_removed.extend(legacy_dir_content.files);
   to_be_removed.extend(legacy_dir_content.directories);
+
+  // Skip the config directory itself to preserve the symbolic link (if present)
+  let config_dir_as_str = paths.config.to_string_lossy().to_string();
+  to_be_removed.retain(|path| path != &config_dir_as_str);
+
   fs_extra::remove_items(&to_be_removed).expect("unable to remove previous configuration");
   fs_extra::dir::copy(
     &temp_out_dir,
     &paths.config,
     &CopyOptions {
       copy_inside: true,
+      content_only: true,
       ..Default::default()
     },
   )
@@ -186,48 +187,6 @@ fn find_available_backup_dir() -> PathBuf {
   }
 
   panic!("could not generate valid backup directory");
-}
-
-fn configure_custom_panic_hook() {
-  let previous_hook = std::panic::take_hook();
-  std::panic::set_hook(Box::new(move |info| {
-    (*previous_hook)(info);
-
-    // Part of this code is taken from the "rust-log-panics" crate
-    let thread = std::thread::current();
-    let thread = thread.name().unwrap_or("<unnamed>");
-
-    let msg = match info.payload().downcast_ref::<&'static str>() {
-      Some(s) => *s,
-      None => match info.payload().downcast_ref::<String>() {
-        Some(s) => &**s,
-        None => "Box<Any>",
-      },
-    };
-
-    match info.location() {
-      Some(location) => {
-        eprintln!(
-          "ERROR: '{}' panicked at '{}': {}:{}",
-          thread,
-          msg,
-          location.file(),
-          location.line(),
-        );
-      }
-      None => eprintln!("ERROR: '{}' panicked at '{}'", thread, msg,),
-    }
-
-    let exit_code = CURRENT_PANIC_EXIT_CODE.lock().unwrap();
-    std::process::exit(*exit_code);
-  }));
-}
-
-fn update_panic_exit_code(exit_code: i32) {
-  let mut lock = CURRENT_PANIC_EXIT_CODE
-    .lock()
-    .expect("unable to update panic exit code");
-  *lock = exit_code;
 }
 
 fn error_print_and_log(msg: &str) {

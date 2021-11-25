@@ -21,7 +21,7 @@ use crate::{Extension, ExtensionOutput, ExtensionResult, Params, Value};
 use thiserror::Error;
 
 pub struct EchoExtension {
-  alias: String
+  alias: String,
 }
 
 #[allow(clippy::new_without_default)]
@@ -67,14 +67,14 @@ pub enum EchoExtensionError {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::iter::FromIterator;
 
   #[test]
   fn echo_works_correctly() {
     let extension = EchoExtension::new();
 
-    let param =
-      Params::from_iter(vec![("echo".to_string(), Value::String("test".to_string()))].into_iter());
+    let param = vec![("echo".to_string(), Value::String("test".to_string()))]
+      .into_iter()
+      .collect::<Params>();
     assert_eq!(
       extension
         .calculate(&Default::default(), &Default::default(), &param)
@@ -89,7 +89,10 @@ mod tests {
     let extension = EchoExtension::new();
 
     let param = Params::new();
-    assert!(matches!(extension.calculate(&Default::default(), &Default::default(), &param), ExtensionResult::Error(_)));
+    assert!(matches!(
+      extension.calculate(&Default::default(), &Default::default(), &param),
+      ExtensionResult::Error(_)
+    ));
   }
 
   #[test]

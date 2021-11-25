@@ -20,7 +20,7 @@
 use crossbeam::channel::{Receiver, Select, SelectedOperation};
 use espanso_ui::event::UIEvent;
 
-use crate::engine::{
+use espanso_engine::{
   event::{input::ContextMenuClickedEvent, Event, EventType},
   funnel,
 };
@@ -46,19 +46,20 @@ impl<'a> funnel::Source<'a> for UISource<'a> {
     select.recv(&self.ui_receiver)
   }
 
-  fn receive(&self, op: SelectedOperation) -> Event {
+  fn receive(&self, op: SelectedOperation) -> Option<Event> {
     let ui_event = op
       .recv(&self.ui_receiver)
       .expect("unable to select data from UISource receiver");
 
-    Event {
+    Some(Event {
       source_id: self.sequencer.next_id(),
       etype: match ui_event {
         UIEvent::TrayIconClick => EventType::TrayIconClicked,
         UIEvent::ContextMenuClick(context_item_id) => {
           EventType::ContextMenuClicked(ContextMenuClickedEvent { context_item_id })
         }
+        UIEvent::Heartbeat => EventType::Heartbeat,
       },
-    }
+    })
   }
 }

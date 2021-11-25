@@ -17,6 +17,7 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use regex::{Captures, Regex};
 use std::{cmp::Ordering, collections::HashMap, path::PathBuf};
 use yaml_rust::{yaml::Hash, Yaml};
 
@@ -42,7 +43,9 @@ pub fn convert(input_files: HashMap<String, Hash>) -> HashMap<String, ConvertedF
 
     if let Some(parent) = yaml_parent {
       if parent != "default" {
-        eprintln!("WARNING: nested 'parent' instructions are not currently supported by the migration tool");
+        eprintln!(
+          "WARNING: nested 'parent' instructions are not currently supported by the migration tool"
+        );
       }
     }
 
@@ -61,28 +64,38 @@ pub fn convert(input_files: HashMap<String, Hash>) -> HashMap<String, ConvertedF
 
       let output_yaml = output_files
         .entry(match_output_path.clone())
-        .or_insert(ConvertedFile { 
+        .or_insert(ConvertedFile {
           origin: input_path.to_string(),
           content: Hash::new(),
         });
 
       if let Some(global_vars) = yaml_global_vars {
-        let output_global_vars = output_yaml.content
+        let mut patched_global_vars: Vec<Yaml> = global_vars.clone();
+        patched_global_vars
+          .iter_mut()
+          .for_each(apply_form_syntax_patch_to_variable);
+
+        let output_global_vars = output_yaml
+          .content
           .entry(Yaml::String("global_vars".to_string()))
           .or_insert(Yaml::Array(Vec::new()));
         if let Yaml::Array(out_global_vars) = output_global_vars {
-          out_global_vars.extend(global_vars.clone());
+          out_global_vars.extend(patched_global_vars);
         } else {
           eprintln!("unable to transform global_vars for file: {}", input_path);
         }
       }
 
       if let Some(matches) = yaml_matches {
-        let output_matches = output_yaml.content
+        let mut patched_matches = matches.clone();
+        apply_form_syntax_patch(&mut patched_matches);
+
+        let output_matches = output_yaml
+          .content
           .entry(Yaml::String("matches".to_string()))
           .or_insert(Yaml::Array(Vec::new()));
         if let Yaml::Array(out_matches) = output_matches {
-          out_matches.extend(matches.clone());
+          out_matches.extend(patched_matches);
         } else {
           eprintln!("unable to transform matches for file: {}", input_path);
         }
@@ -123,33 +136,75 @@ pub fn convert(input_files: HashMap<String, Hash>) -> HashMap<String, ConvertedF
         "paste_shortcut",
         |val| match val {
           Yaml::String(shortcut) if shortcut == "CtrlV" => Some(Yaml::String("CTRL+V".to_string())),
-          Yaml::String(shortcut) if shortcut == "CtrlShiftV" => Some(Yaml::String("CTRL+SHIFT+V".to_string())),
-          Yaml::String(shortcut) if shortcut == "ShiftInsert" => Some(Yaml::String("SHIFT+INSERT".to_string())),
-          Yaml::String(shortcut) if shortcut == "CtrlAltV" => Some(Yaml::String("CTRL+ALT+V".to_string())),
+          Yaml::String(shortcut) if shortcut == "CtrlShiftV" => {
+            Some(Yaml::String("CTRL+SHIFT+V".to_string()))
+          }
+          Yaml::String(shortcut) if shortcut == "ShiftInsert" => {
+            Some(Yaml::String("SHIFT+INSERT".to_string()))
+          }
+          Yaml::String(shortcut) if shortcut == "CtrlAltV" => {
+            Some(Yaml::String("CTRL+ALT+V".to_string()))
+          }
           Yaml::String(shortcut) if shortcut == "MetaV" => Some(Yaml::String("META+V".to_string())),
           Yaml::String(_) => None,
           _ => None,
         },
       );
-      copy_field_if_present(yaml, "secure_input_watcher_enabled", &mut output_yaml, "secure_input_watcher_enabled");
-      copy_field_if_present(yaml, "secure_input_watcher_interval", &mut output_yaml, "secure_input_watcher_interval");
-      copy_field_if_present(yaml, "secure_input_notification", &mut output_yaml, "secure_input_notification");
-      copy_field_if_present(yaml, "config_caching_interval", &mut output_yaml, "config_caching_interval");
+      //copy_field_if_present(yaml, "secure_input_watcher_enabled", &mut output_yaml, "secure_input_watcher_enabled");
+      //copy_field_if_present(yaml, "secure_input_watcher_interval", &mut output_yaml, "secure_input_watcher_interval");
+      //copy_field_if_present(yaml, "config_caching_interval", &mut output_yaml, "config_caching_interval");
+      //copy_field_if_present(yaml, "use_system_agent", &mut output_yaml, "use_system_agent");
+
+      copy_field_if_present(
+        yaml,
+        "secure_input_notification",
+        &mut output_yaml,
+        "secure_input_notification",
+      );
       copy_field_if_present(yaml, "toggle_interval", &mut output_yaml, "toggle_interval");
       copy_field_if_present(yaml, "toggle_key", &mut output_yaml, "toggle_key");
-      copy_field_if_present(yaml, "preserve_clipboard", &mut output_yaml, "preserve_clipboard");
+      copy_field_if_present(
+        yaml,
+        "preserve_clipboard",
+        &mut output_yaml,
+        "preserve_clipboard",
+      );
       copy_field_if_present(yaml, "backspace_limit", &mut output_yaml, "backspace_limit");
-      copy_field_if_present(yaml, "fast_inject", &mut output_yaml, "x11_fast_inject");
+      map_field_if_present(
+        yaml,
+        "fast_inject",
+        &mut output_yaml,
+        "disable_x11_fast_inject",
+        |val| match val {
+          Yaml::Boolean(false) => Some(Yaml::Boolean(true)),
+          Yaml::Boolean(true) => Some(Yaml::Boolean(false)),
+          _ => None,
+        },
+      );
+
       copy_field_if_present(yaml, "auto_restart", &mut output_yaml, "auto_restart");
       copy_field_if_present(yaml, "undo_backspace", &mut output_yaml, "undo_backspace");
       copy_field_if_present(yaml, "show_icon", &mut output_yaml, "show_icon");
-      copy_field_if_present(yaml, "show_notifications", &mut output_yaml, "show_notifications");
+      copy_field_if_present(
+        yaml,
+        "show_notifications",
+        &mut output_yaml,
+        "show_notifications",
+      );
       copy_field_if_present(yaml, "inject_delay", &mut output_yaml, "inject_delay");
-      copy_field_if_present(yaml, "restore_clipboard_delay", &mut output_yaml, "restore_clipboard_delay");
-      copy_field_if_present(yaml, "use_system_agent", &mut output_yaml, "use_system_agent");
+      copy_field_if_present(
+        yaml,
+        "restore_clipboard_delay",
+        &mut output_yaml,
+        "restore_clipboard_delay",
+      );
+      copy_field_if_present(yaml, "backspace_delay", &mut output_yaml, "key_delay");
       copy_field_if_present(yaml, "word_separators", &mut output_yaml, "word_separators");
 
-      if yaml.get(&Yaml::String("enable_passive".to_string())).is_some() {
+      if yaml
+        .get(&Yaml::String("enable_passive".to_string()))
+        .is_some()
+      {
         eprintln!("WARNING: passive-mode directives were detected, but passive-mode is not supported anymore.");
         eprintln!("Please follow this issue to discover the alternatives: https://github.com/federico-terzi/espanso/issues/540");
       }
@@ -170,10 +225,13 @@ pub fn convert(input_files: HashMap<String, Hash>) -> HashMap<String, ConvertedF
         output_yaml.insert(Yaml::String(key_name.to_string()), Yaml::Array(includes));
       }
 
-      output_files.insert(config_output_path, ConvertedFile {
-        origin: input_path,
-        content: output_yaml,
-      });
+      output_files.insert(
+        config_output_path,
+        ConvertedFile {
+          origin: input_path,
+          content: output_yaml,
+        },
+      );
     }
   }
 
@@ -183,8 +241,9 @@ pub fn convert(input_files: HashMap<String, Hash>) -> HashMap<String, ConvertedF
 fn sort_input_files(input_files: &HashMap<String, Hash>) -> Vec<String> {
   let mut files: Vec<String> = input_files.iter().map(|(key, _)| key.clone()).collect();
   files.sort_by(|f1, f2| {
-    let f1_slashes = f1.matches("/").count();
-    let f2_slashes = f2.matches("/").count();
+    let f1_slashes = f1.matches('/').count();
+    let f2_slashes = f2.matches('/').count();
+    #[allow(clippy::comparison_chain)]
     if f1_slashes > f2_slashes {
       Ordering::Greater
     } else if f1_slashes < f2_slashes {
@@ -241,7 +300,7 @@ fn yaml_get_string<'a>(yaml: &'a Hash, name: &str) -> Option<&'a str> {
     .and_then(|v| v.as_str())
 }
 
-fn yaml_get_bool<'a>(yaml: &'a Hash, name: &str) -> Option<bool> {
+fn yaml_get_bool(yaml: &Hash, name: &str) -> Option<bool> {
   yaml
     .get(&Yaml::String(name.to_string()))
     .and_then(|v| v.as_bool())
@@ -273,4 +332,58 @@ fn map_field_if_present(
       eprintln!("could not convert value for field: {}", input_field_name);
     }
   }
+}
+
+// This is needed to convert the old form's {{control}} syntax to the new [[control]] one.
+fn apply_form_syntax_patch(matches: &mut Vec<Yaml>) {
+  matches.iter_mut().for_each(|m| {
+    if let Yaml::Hash(fields) = m {
+      if let Some(Yaml::String(form_option)) = fields.get_mut(&Yaml::String("form".to_string())) {
+        let converted = replace_legacy_form_syntax_with_new_one(form_option);
+        if &converted != form_option {
+          form_option.clear();
+          form_option.push_str(&converted);
+        }
+      }
+
+      if let Some(Yaml::Array(vars)) = fields.get_mut(&Yaml::String("vars".to_string())) {
+        vars
+          .iter_mut()
+          .for_each(apply_form_syntax_patch_to_variable)
+      }
+    }
+  })
+}
+
+fn apply_form_syntax_patch_to_variable(variable: &mut Yaml) {
+  if let Yaml::Hash(fields) = variable {
+    if let Some(Yaml::String(var_type)) = fields.get(&Yaml::String("type".to_string())) {
+      if var_type != "form" {
+        return;
+      }
+    }
+
+    if let Some(Yaml::Hash(params)) = fields.get_mut(&Yaml::String("params".to_string())) {
+      if let Some(Yaml::String(layout)) = params.get_mut(&Yaml::String("layout".to_string())) {
+        let converted = replace_legacy_form_syntax_with_new_one(layout);
+        if &converted != layout {
+          layout.clear();
+          layout.push_str(&converted);
+        }
+      }
+    }
+  }
+}
+
+lazy_static! {
+  static ref LEGACY_FIELD_REGEX: Regex = Regex::new(r"\{\{(?P<name>.*?)\}\}").unwrap();
+}
+
+fn replace_legacy_form_syntax_with_new_one(layout: &str) -> String {
+  LEGACY_FIELD_REGEX
+    .replace_all(layout, |caps: &Captures| {
+      let field_name = caps.name("name").unwrap().as_str();
+      format!("[[{}]]", field_name)
+    })
+    .to_string()
 }

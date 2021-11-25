@@ -89,7 +89,7 @@ impl Extension for ScriptExtension {
 
       let mut command = Command::new(&args[0]);
       command.env("CONFIG", self.config_path.to_string_lossy().to_string());
-      for (key, value) in super::util::convert_to_env_variables(&scope) {
+      for (key, value) in super::util::convert_to_env_variables(scope) {
         command.env(key, value);
       }
 
@@ -181,7 +181,6 @@ mod tests {
   use super::*;
   #[cfg(not(target_os = "windows"))]
   use crate::Scope;
-  use std::iter::FromIterator;
 
   fn get_extension() -> ScriptExtension {
     ScriptExtension::new(&PathBuf::new(), &PathBuf::new(), &PathBuf::new())
@@ -192,16 +191,15 @@ mod tests {
   fn basic() {
     let extension = get_extension();
 
-    let param = Params::from_iter(
-      vec![(
-        "args".to_string(),
-        Value::Array(vec![
-          Value::String("echo".to_string()),
-          Value::String("hello world".to_string()),
-        ]),
-      )]
-      .into_iter(),
-    );
+    let param = vec![(
+      "args".to_string(),
+      Value::Array(vec![
+        Value::String("echo".to_string()),
+        Value::String("hello world".to_string()),
+      ]),
+    )]
+    .into_iter()
+    .collect::<Params>();
     assert_eq!(
       extension
         .calculate(&Default::default(), &Default::default(), &param)
@@ -216,19 +214,18 @@ mod tests {
   fn basic_no_trim() {
     let extension = get_extension();
 
-    let param = Params::from_iter(
-      vec![
-        (
-          "args".to_string(),
-          Value::Array(vec![
-            Value::String("echo".to_string()),
-            Value::String("hello world".to_string()),
-          ]),
-        ),
-        ("trim".to_string(), Value::Bool(false)),
-      ]
-      .into_iter(),
-    );
+    let param = vec![
+      (
+        "args".to_string(),
+        Value::Array(vec![
+          Value::String("echo".to_string()),
+          Value::String("hello world".to_string()),
+        ]),
+      ),
+      ("trim".to_string(), Value::Bool(false)),
+    ]
+    .into_iter()
+    .collect::<Params>();
     if cfg!(target_os = "windows") {
       assert_eq!(
         extension
@@ -253,19 +250,16 @@ mod tests {
   fn var_injection() {
     let extension = get_extension();
 
-    let param = Params::from_iter(
-      vec![
-        (
-          "args".to_string(),
-          Value::Array(vec![
-            Value::String("sh".to_string()),
-            Value::String("-c".to_string()),
-            Value::String("echo $ESPANSO_VAR1".to_string()),
-          ]),
-        ),
-      ]
-      .into_iter(),
-    );
+    let param = vec![(
+      "args".to_string(),
+      Value::Array(vec![
+        Value::String("sh".to_string()),
+        Value::String("-c".to_string()),
+        Value::String("echo $ESPANSO_VAR1".to_string()),
+      ]),
+    )]
+    .into_iter()
+    .collect::<Params>();
     let mut scope = Scope::new();
     scope.insert("var1", ExtensionOutput::Single("hello world".to_string()));
     assert_eq!(
@@ -281,17 +275,12 @@ mod tests {
   fn invalid_command() {
     let extension = get_extension();
 
-    let param = Params::from_iter(
-      vec![
-        (
-          "args".to_string(),
-          Value::Array(vec![
-            Value::String("nonexistentcommand".to_string()),
-          ]),
-        ),
-      ]
-      .into_iter(),
-    );
+    let param = vec![(
+      "args".to_string(),
+      Value::Array(vec![Value::String("nonexistentcommand".to_string())]),
+    )]
+    .into_iter()
+    .collect::<Params>();
     assert!(matches!(
       extension.calculate(&Default::default(), &Default::default(), &param),
       ExtensionResult::Error(_)
@@ -302,20 +291,17 @@ mod tests {
   #[cfg(not(target_os = "windows"))]
   fn exit_error() {
     let extension = get_extension();
-    
-    let param = Params::from_iter(
-      vec![
-        (
-          "args".to_string(),
-          Value::Array(vec![
-            Value::String("sh".to_string()),
-            Value::String("-c".to_string()),
-            Value::String("exit 1".to_string()),
-          ]),
-        ),
-      ]
-      .into_iter(),
-    );
+
+    let param = vec![(
+      "args".to_string(),
+      Value::Array(vec![
+        Value::String("sh".to_string()),
+        Value::String("-c".to_string()),
+        Value::String("exit 1".to_string()),
+      ]),
+    )]
+    .into_iter()
+    .collect::<Params>();
     assert!(matches!(
       extension.calculate(&Default::default(), &Default::default(), &param),
       ExtensionResult::Error(_)
@@ -326,21 +312,20 @@ mod tests {
   #[cfg(not(target_os = "windows"))]
   fn ignore_error() {
     let extension = get_extension();
-    
-    let param = Params::from_iter(
-      vec![
-        (
-          "args".to_string(),
-          Value::Array(vec![
-            Value::String("sh".to_string()),
-            Value::String("-c".to_string()),
-            Value::String("exit 1".to_string()),
-          ]),
-        ),
-        ("ignore_error".to_string(), Value::Bool(true)),
-      ]
-      .into_iter(),
-    );
+
+    let param = vec![
+      (
+        "args".to_string(),
+        Value::Array(vec![
+          Value::String("sh".to_string()),
+          Value::String("-c".to_string()),
+          Value::String("exit 1".to_string()),
+        ]),
+      ),
+      ("ignore_error".to_string(), Value::Bool(true)),
+    ]
+    .into_iter()
+    .collect::<Params>();
     assert_eq!(
       extension
         .calculate(&Default::default(), &Default::default(), &param)

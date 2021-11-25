@@ -23,6 +23,10 @@ use super::{CliModule, CliModuleArgs};
 mod form;
 #[cfg(feature = "modulo")]
 mod search;
+#[cfg(feature = "modulo")]
+mod troubleshoot;
+#[cfg(feature = "modulo")]
+mod welcome;
 
 pub fn new() -> CliModule {
   #[allow(clippy::needless_update)]
@@ -47,6 +51,14 @@ fn modulo_main(args: CliModuleArgs) -> i32 {
 
   if let Some(matches) = cli_args.subcommand_matches("search") {
     return search::search_main(matches, &icon_paths);
+  }
+
+  if let Some(matches) = cli_args.subcommand_matches("welcome") {
+    return welcome::welcome_main(matches, &paths, &icon_paths);
+  }
+
+  if cli_args.subcommand_matches("troubleshoot").is_some() {
+    return troubleshoot::troubleshoot_main(&paths, &icon_paths);
   }
 
   0

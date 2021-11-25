@@ -30,7 +30,8 @@ const WINDOWS_NORMAL_DARK_ICO_BINARY: &[u8] = include_bytes!("res/windows/normal
 const WINDOWS_DISABLED_DARK_ICO_BINARY: &[u8] = include_bytes!("res/windows/disabled_dark.ico");
 #[cfg(target_os = "windows")]
 const WINDOWS_LOGO_ICO_BINARY: &[u8] = include_bytes!("res/windows/logo.ico");
-
+#[cfg(target_os = "windows")]
+const WINDOWS_TRAY_EXPLAIN_IMAGE: &[u8] = include_bytes!("res/windows/tray_explain_image.png");
 
 #[cfg(target_os = "macos")]
 const MAC_BINARY: &[u8] = include_bytes!("res/macos/icon.png");
@@ -38,6 +39,12 @@ const MAC_BINARY: &[u8] = include_bytes!("res/macos/icon.png");
 const MAC_DISABLED_BINARY: &[u8] = include_bytes!("res/macos/icondisabled.png");
 #[cfg(target_os = "macos")]
 const MAC_SYSTEM_DISABLED_BINARY: &[u8] = include_bytes!("res/macos/iconsystemdisabled.png");
+#[cfg(target_os = "macos")]
+const MAC_ACCESSIBILITY_1_BINARY: &[u8] = include_bytes!("res/accessibility_1.png");
+#[cfg(target_os = "macos")]
+const MAC_ACCESSIBILITY_2_BINARY: &[u8] = include_bytes!("res/accessibility_2.png");
+#[cfg(target_os = "macos")]
+const MAC_STATUS_ICON_EXPLAIN_IMAGE: &[u8] = include_bytes!("res/macos/icon_explain_image.png");
 
 #[derive(Debug, Default)]
 pub struct IconPaths {
@@ -47,22 +54,45 @@ pub struct IconPaths {
 
   pub tray_icon_normal: Option<PathBuf>,
   pub tray_icon_disabled: Option<PathBuf>,
-  pub tray_icon_system_disabled: Option<PathBuf>, // TODO: secure input
+  pub tray_icon_system_disabled: Option<PathBuf>,
 
-  pub logo: Option<PathBuf>, 
+  pub accessibility_image_1: Option<PathBuf>,
+  pub accessibility_image_2: Option<PathBuf>,
+  pub tray_explain_image: Option<PathBuf>,
+
+  pub logo: Option<PathBuf>,
   pub logo_no_background: Option<PathBuf>,
 }
 
 #[cfg(target_os = "windows")]
 pub fn load_icon_paths(runtime_dir: &Path) -> Result<IconPaths> {
   Ok(IconPaths {
-    form_icon: Some(extract_icon(WINDOWS_LOGO_ICO_BINARY, &runtime_dir.join("form.ico"))?),
+    form_icon: Some(extract_icon(
+      WINDOWS_LOGO_ICO_BINARY,
+      &runtime_dir.join("formv2.ico"),
+    )?),
     search_icon: Some(extract_icon(ICON_BINARY, &runtime_dir.join("search.png"))?),
-    wizard_icon: Some(extract_icon(WINDOWS_LOGO_ICO_BINARY, &runtime_dir.join("wizard.ico"))?),
-    tray_icon_normal: Some(extract_icon(WINDOWS_NORMAL_DARK_ICO_BINARY, &runtime_dir.join("normal.ico"))?),
-    tray_icon_disabled: Some(extract_icon(WINDOWS_DISABLED_DARK_ICO_BINARY, &runtime_dir.join("disabled.ico"))?),
-    logo: Some(extract_icon(ICON_BINARY, &runtime_dir.join("icon.png"))?),
-    logo_no_background: Some(extract_icon(LOGO_NO_BACKGROUND_BINARY, &runtime_dir.join("icon_no_background.png"))?),
+    wizard_icon: Some(extract_icon(
+      WINDOWS_LOGO_ICO_BINARY,
+      &runtime_dir.join("wizardv2.ico"),
+    )?),
+    tray_icon_normal: Some(extract_icon(
+      WINDOWS_NORMAL_DARK_ICO_BINARY,
+      &runtime_dir.join("normalv2.ico"),
+    )?),
+    tray_icon_disabled: Some(extract_icon(
+      WINDOWS_DISABLED_DARK_ICO_BINARY,
+      &runtime_dir.join("disabledv2.ico"),
+    )?),
+    logo: Some(extract_icon(ICON_BINARY, &runtime_dir.join("iconv2.png"))?),
+    logo_no_background: Some(extract_icon(
+      LOGO_NO_BACKGROUND_BINARY,
+      &runtime_dir.join("icon_no_backgroundv2.png"),
+    )?),
+    tray_explain_image: Some(extract_icon(
+      WINDOWS_TRAY_EXPLAIN_IMAGE,
+      &runtime_dir.join("tray_explain_image.png"),
+    )?),
     ..Default::default()
   })
 }
@@ -70,12 +100,36 @@ pub fn load_icon_paths(runtime_dir: &Path) -> Result<IconPaths> {
 #[cfg(target_os = "macos")]
 pub fn load_icon_paths(runtime_dir: &Path) -> Result<IconPaths> {
   Ok(IconPaths {
-    search_icon: Some(extract_icon(ICON_BINARY, &runtime_dir.join("search.png"))?),
-    tray_icon_normal: Some(extract_icon(MAC_BINARY, &runtime_dir.join("normal.png"))?),
-    tray_icon_disabled: Some(extract_icon(MAC_DISABLED_BINARY, &runtime_dir.join("disabled.png"))?),
-    tray_icon_system_disabled: Some(extract_icon(MAC_SYSTEM_DISABLED_BINARY, &runtime_dir.join("systemdisabled.png"))?),
-    logo: Some(extract_icon(ICON_BINARY, &runtime_dir.join("icon.png"))?),
-    logo_no_background: Some(extract_icon(LOGO_NO_BACKGROUND_BINARY, &runtime_dir.join("icon_no_background.png"))?),
+    search_icon: Some(extract_icon(
+      ICON_BINARY,
+      &runtime_dir.join("searchv2.png"),
+    )?),
+    tray_icon_normal: Some(extract_icon(MAC_BINARY, &runtime_dir.join("normalv2.png"))?),
+    tray_icon_disabled: Some(extract_icon(
+      MAC_DISABLED_BINARY,
+      &runtime_dir.join("disabledv2.png"),
+    )?),
+    tray_icon_system_disabled: Some(extract_icon(
+      MAC_SYSTEM_DISABLED_BINARY,
+      &runtime_dir.join("systemdisabledv2.png"),
+    )?),
+    logo: Some(extract_icon(ICON_BINARY, &runtime_dir.join("iconv2.png"))?),
+    logo_no_background: Some(extract_icon(
+      LOGO_NO_BACKGROUND_BINARY,
+      &runtime_dir.join("icon_no_background.png"),
+    )?),
+    accessibility_image_1: Some(extract_icon(
+      MAC_ACCESSIBILITY_1_BINARY,
+      &runtime_dir.join("accessibility_1.png"),
+    )?),
+    accessibility_image_2: Some(extract_icon(
+      MAC_ACCESSIBILITY_2_BINARY,
+      &runtime_dir.join("accessibility_2.png"),
+    )?),
+    tray_explain_image: Some(extract_icon(
+      MAC_STATUS_ICON_EXPLAIN_IMAGE,
+      &runtime_dir.join("icon_explain_image.png"),
+    )?),
     ..Default::default()
   })
 }
@@ -83,9 +137,12 @@ pub fn load_icon_paths(runtime_dir: &Path) -> Result<IconPaths> {
 #[cfg(target_os = "linux")]
 pub fn load_icon_paths(runtime_dir: &Path) -> Result<IconPaths> {
   Ok(IconPaths {
-    logo: Some(extract_icon(ICON_BINARY, &runtime_dir.join("icon.png"))?),
+    logo: Some(extract_icon(ICON_BINARY, &runtime_dir.join("iconv2.png"))?),
     search_icon: Some(extract_icon(ICON_BINARY, &runtime_dir.join("search.png"))?),
-    logo_no_background: Some(extract_icon(LOGO_NO_BACKGROUND_BINARY, &runtime_dir.join("icon_no_background.png"))?),
+    logo_no_background: Some(extract_icon(
+      LOGO_NO_BACKGROUND_BINARY,
+      &runtime_dir.join("icon_no_background.png"),
+    )?),
     ..Default::default()
   })
 }
@@ -97,10 +154,10 @@ fn extract_icon(data: &[u8], target_file: &Path) -> Result<PathBuf> {
       "skipping extraction for '{:?}', as it's already present",
       target_file
     );
-    Ok(target_file.to_owned())
   } else {
     std::fs::write(target_file, data)?;
     info!("extracted icon to: {:?}", target_file);
-    Ok(target_file.to_owned())
   }
+
+  Ok(target_file.to_owned())
 }

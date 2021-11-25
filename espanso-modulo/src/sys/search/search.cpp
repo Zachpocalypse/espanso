@@ -44,6 +44,8 @@ const int SEARCH_BAR_FONT_SIZE = 20;
 const long DEFAULT_STYLE = wxSTAY_ON_TOP | wxFRAME_TOOL_WINDOW | wxBORDER_NONE;
 #endif
 
+const int HELP_TEXT_FONT_SIZE = 10;
+
 const wxColour SELECTION_LIGHT_BG = wxColour(164, 210, 253);
 const wxColour SELECTION_DARK_BG = wxColour(49, 88, 126);
 
@@ -138,6 +140,7 @@ public:
     wxPanel *panel;
     wxTextCtrl *searchBar;
     wxStaticBitmap *iconPanel;
+    wxStaticText *helpText;
     ResultListBox *resultBox;
     void SetItems(SearchItem *items, int itemSize);
 
@@ -163,7 +166,7 @@ private:
 
 bool SearchApp::OnInit()
 {
-    SearchFrame *frame = new SearchFrame(searchMetadata->windowTitle, wxPoint(50, 50), wxSize(450, 340));
+    SearchFrame *frame = new SearchFrame(wxString::FromUTF8(searchMetadata->windowTitle), wxPoint(50, 50), wxSize(450, 340));
     frame->Show(true);
     SetupWindowStyle(frame);
     Activate(frame);
@@ -195,7 +198,7 @@ SearchFrame::SearchFrame(const wxString &title, const wxPoint &pos, const wxSize
     iconPanel = nullptr;
     if (searchMetadata->iconPath)
     {
-        wxString iconPath = wxString(searchMetadata->iconPath);
+        wxString iconPath = wxString::FromUTF8(searchMetadata->iconPath);
         if (wxFileExists(iconPath))
         {
             wxBitmap bitmap = wxBitmap(iconPath, wxBITMAP_TYPE_PNG);
@@ -219,12 +222,21 @@ SearchFrame::SearchFrame(const wxString &title, const wxPoint &pos, const wxSize
 
     vbox->Add(topBox, 1, wxEXPAND);
 
+    if (searchMetadata->hintText) {
+        helpText = new wxStaticText(panel, wxID_ANY, wxString::FromUTF8(searchMetadata->hintText));
+        vbox->Add(helpText, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+        wxFont helpFont = helpText->GetFont();
+        helpFont.SetPointSize(HELP_TEXT_FONT_SIZE);
+        helpText->SetFont(helpFont);
+    }
+
     wxArrayString choices;
     int resultId = NewControlId();
     resultBox = new ResultListBox(panel, isDark, resultId, wxDefaultPosition, wxSize(MIN_WIDTH, MIN_HEIGHT));
     vbox->Add(resultBox, 5, wxEXPAND | wxALL, 0);
 
     Bind(wxEVT_CHAR_HOOK, &SearchFrame::OnCharEvent, this, wxID_ANY);
+    searchBar->Bind(wxEVT_CHAR, &SearchFrame::OnCharEvent, this, wxID_ANY);
     Bind(wxEVT_TEXT, &SearchFrame::OnQueryChange, this, textId);
     Bind(wxEVT_LISTBOX_DCLICK, &SearchFrame::OnItemClickEvent, this, resultId);
     Bind(wxEVT_ACTIVATE, &SearchFrame::OnActivate, this, wxID_ANY);
@@ -265,9 +277,9 @@ void SearchFrame::OnCharEvent(wxKeyEvent &event)
             SelectNext();
         }
     }
-    else if (event.GetKeyCode() >= 49 && event.GetKeyCode() <= 56)
+    else if (event.GetUnicodeKey() >= '1' && event.GetUnicodeKey() <= '9')
     { // Alt + num shortcut
-        int index = event.GetKeyCode() - 49;
+        int index = event.GetUnicodeKey() - '1';
         if (wxGetKeyState(WXK_ALT))
         {
             if (resultBox->GetItemCount() > index)
@@ -299,6 +311,12 @@ void SearchFrame::OnCharEvent(wxKeyEvent &event)
 
 void SearchFrame::OnQueryChange(wxCommandEvent &event)
 {
+    if (helpText != nullptr) {
+        helpText->Destroy();
+        panel->Layout();
+        helpText = nullptr;
+    }
+    
     wxString queryString = searchBar->GetValue();
     const char *query = queryString.ToUTF8();
     queryCallback(query, (void *)this, data);
@@ -383,13 +401,13 @@ void SearchFrame::SetItems(SearchItem *items, int itemSize)
 
     for (int i = 0; i < itemSize; i++)
     {
-        wxString item = items[i].label;
+        wxString item = wxString::FromUTF8(items[i].label);
         wxItems.Add(item);
 
-        wxString id = items[i].id;
+        wxString id = wxString::FromUTF8(items[i].id);
         wxIds.Add(id);
 
-        wxString trigger = items[i].trigger;
+        wxString trigger = wxString::FromUTF8(items[i].trigger);
         wxTriggers.Add(trigger);
     }
 

@@ -19,19 +19,19 @@
 
 use std::{path::Path, process::Command};
 
-use anyhow::Result;
-use thiserror::Error;
+use anyhow::{bail, Result};
 use espanso_path::Paths;
+use thiserror::Error;
 
-use crate::{exit_code::{MIGRATE_CLEAN_FAILURE, MIGRATE_DIRTY_FAILURE}, lock::acquire_legacy_lock};
+use crate::{
+  exit_code::{MIGRATE_CLEAN_FAILURE, MIGRATE_DIRTY_FAILURE},
+  lock::acquire_legacy_lock,
+  util::set_command_flags,
+};
 
 pub fn is_legacy_version_running(runtime_path: &Path) -> bool {
   let legacy_lock_file = acquire_legacy_lock(runtime_path);
-  if legacy_lock_file.is_none() {
-    true
-  } else {
-    false
-  }
+  legacy_lock_file.is_none()
 }
 
 pub fn migrate_configuration(paths: &Paths) -> Result<()> {
@@ -58,9 +58,9 @@ pub fn migrate_configuration(paths: &Paths) -> Result<()> {
     Ok(())
   } else {
     match result.code() {
-      Some(code) if code == MIGRATE_CLEAN_FAILURE => Err(MigrationError::CleanError.into()),
-      Some(code) if code == MIGRATE_DIRTY_FAILURE=> Err(MigrationError::DirtyError.into()),
-      _ => Err(MigrationError::UnexpectedError.into())
+      Some(code) if code == MIGRATE_CLEAN_FAILURE => Err(MigrationError::Clean.into()),
+      Some(code) if code == MIGRATE_DIRTY_FAILURE => Err(MigrationError::Dirty.into()),
+      _ => Err(MigrationError::Unexpected.into()),
     }
   }
 }
@@ -68,11 +68,65 @@ pub fn migrate_configuration(paths: &Paths) -> Result<()> {
 #[derive(Error, Debug)]
 pub enum MigrationError {
   #[error("clean error")]
-  CleanError,
+  Clean,
 
   #[error("dirty error")]
-  DirtyError,
+  Dirty,
 
   #[error("unexpected error")]
-  UnexpectedError,
+  Unexpected,
+}
+
+pub fn add_espanso_to_path() -> Result<()> {
+  let espanso_exe_path = std::env::current_exe()?;
+  let mut command = Command::new(&espanso_exe_path.to_string_lossy().to_string());
+  command.args(&["env-path", "--prompt", "register"]);
+
+  let mut child = command.spawn()?;
+  let result = child.wait()?;
+
+  if result.success() {
+    Ok(())
+  } else {
+    Err(AddToPathError::NonZeroExitCode.into())
+  }
+}
+
+#[derive(Error, Debug)]
+pub enum AddToPathError {
+  #[error("unexpected error, 'espanso env-path register' returned a non-zero exit code.")]
+  NonZeroExitCode,
+}
+
+pub fn show_already_running_warning() -> Result<()> {
+  let espanso_exe_path = std::env::current_exe()?;
+  let mut command = Command::new(&espanso_exe_path.to_string_lossy().to_string());
+  command.args(&["modulo", "welcome", "--already-running"]);
+
+  let mut child = command.spawn()?;
+  child.wait()?;
+  Ok(())
+}
+
+pub fn configure_auto_start(auto_start: bool) -> Result<()> {
+  let espanso_exe_path = std::env::current_exe()?;
+  let mut command = Command::new(&espanso_exe_path.to_string_lossy().to_string());
+  let mut args = vec!["service"];
+  if auto_start {
+    args.push("register");
+  } else {
+    args.push("unregister");
+  }
+
+  command.args(&args);
+  set_command_flags(&mut command);
+
+  let mut child = command.spawn()?;
+  let result = child.wait()?;
+
+  if result.success() {
+    Ok(())
+  } else {
+    bail!("service registration returned non-zero exit code");
+  }
 }

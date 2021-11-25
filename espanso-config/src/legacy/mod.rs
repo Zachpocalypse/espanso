@@ -18,12 +18,16 @@
  */
 
 use anyhow::Result;
+use log::warn;
 use regex::Regex;
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use self::config::LegacyConfig;
 use crate::matches::{
-  group::loader::yaml::parse::{YAMLMatch, YAMLVariable},
+  group::loader::yaml::{
+    parse::{YAMLMatch, YAMLVariable},
+    try_convert_into_match, try_convert_into_variable,
+  },
   MatchEffect,
 };
 use crate::{config::store::DefaultConfigStore, counter::StructId};
@@ -60,7 +64,7 @@ pub fn load(
   let mut match_groups = HashMap::new();
   match_groups.insert("default".to_string(), default_match_group);
 
-  let mut custom_configs: Vec<Box<dyn Config>> = Vec::new();
+  let mut custom_configs: Vec<Arc<dyn Config>> = Vec::new();
   for custom in config_set.specific {
     let (custom_config, mut custom_match_group) = split_config(custom);
     deduplicate_ids(
@@ -70,10 +74,10 @@ pub fn load(
     );
 
     match_groups.insert(custom_config.name.clone(), custom_match_group);
-    custom_configs.push(Box::new(custom_config));
+    custom_configs.push(Arc::new(custom_config));
   }
 
-  let config_store = DefaultConfigStore::from_configs(Box::new(default_config), custom_configs)?;
+  let config_store = DefaultConfigStore::from_configs(Arc::new(default_config), custom_configs)?;
   let match_store = LegacyMatchStore::new(match_groups);
 
   Ok((Box::new(config_store), Box::new(match_store)))
@@ -85,7 +89,10 @@ fn split_config(config: LegacyConfig) -> (LegacyInteropConfig, LegacyMatchGroup)
     .iter()
     .filter_map(|var| {
       let var: YAMLVariable = serde_yaml::from_value(var.clone()).ok()?;
-      let var: Variable = var.try_into().ok()?;
+      let (var, warnings) = try_convert_into_variable(var, true).ok()?;
+      warnings.into_iter().for_each(|warning| {
+        warn!("{}", warning);
+      });
       Some(var)
     })
     .collect();
@@ -95,14 +102,17 @@ fn split_config(config: LegacyConfig) -> (LegacyInteropConfig, LegacyMatchGroup)
     .iter()
     .filter_map(|var| {
       let m: YAMLMatch = serde_yaml::from_value(var.clone()).ok()?;
-      let m: Match = m.try_into().ok()?;
+      let (m, warnings) = try_convert_into_match(m, true).ok()?;
+      warnings.into_iter().for_each(|warning| {
+        warn!("{}", warning);
+      });
       Some(m)
     })
     .collect();
 
   let match_group = LegacyMatchGroup {
-    global_vars,
     matches,
+    global_vars,
   };
 
   let config: LegacyInteropConfig = config.into();
@@ -309,7 +319,7 @@ impl Config for LegacyInteropConfig {
   }
 
   fn disable_x11_fast_inject(&self) -> bool {
-    self.config.fast_inject
+    !self.config.fast_inject
   }
 
   fn inject_delay(&self) -> Option<usize> {
@@ -329,11 +339,64 @@ impl Config for LegacyInteropConfig {
   }
 
   fn word_separators(&self) -> Vec<String> {
-    self.config.word_separators.iter().map(|c| String::from(*c)).collect()
+    self
+      .config
+      .word_separators
+      .iter()
+      .map(|c| String::from(*c))
+      .collect()
   }
 
   fn backspace_limit(&self) -> usize {
     self.config.backspace_limit.try_into().unwrap()
+  }
+
+  fn apply_patch(&self) -> bool {
+    true
+  }
+
+  fn keyboard_layout(&self) -> Option<crate::config::RMLVOConfig> {
+    None
+  }
+
+  fn search_trigger(&self) -> Option<String> {
+    self.config.search_trigger.clone()
+  }
+
+  fn search_shortcut(&self) -> Option<String> {
+    self.config.search_shortcut.clone()
+  }
+
+  fn undo_backspace(&self) -> bool {
+    self.config.undo_backspace
+  }
+
+  fn show_icon(&self) -> bool {
+    self.config.show_icon
+  }
+
+  fn show_notifications(&self) -> bool {
+    self.config.show_notifications
+  }
+
+  fn secure_input_notification(&self) -> bool {
+    self.config.secure_input_notification
+  }
+
+  fn enable(&self) -> bool {
+    self.config.enable_active
+  }
+
+  fn win32_exclude_orphan_events(&self) -> bool {
+    true
+  }
+
+  fn evdev_modifier_delay(&self) -> Option<usize> {
+    Some(10)
+  }
+
+  fn win32_keyboard_layout_cache_interval(&self) -> i64 {
+    2000
   }
 }
 
@@ -355,11 +418,7 @@ impl LegacyMatchStore {
 impl MatchStore for LegacyMatchStore {
   fn query(&self, paths: &[String]) -> MatchSet {
     let group = if !paths.is_empty() {
-      if let Some(group) = self.groups.get(&paths[0]) {
-        Some(group)
-      } else {
-        None
-      }
+      self.groups.get(&paths[0])
     } else {
       None
     };
@@ -375,6 +434,10 @@ impl MatchStore for LegacyMatchStore {
         global_vars: Vec::new(),
       }
     }
+  }
+
+  fn loaded_paths(&self) -> Vec<String> {
+    self.groups.keys().cloned().collect()
   }
 }
 

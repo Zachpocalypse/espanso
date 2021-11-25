@@ -17,11 +17,11 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{path::Path};
+use std::path::Path;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_yaml::{Mapping};
+use serde_yaml::Mapping;
 
 use crate::util::is_yaml_empty;
 
@@ -58,6 +58,9 @@ impl YAMLMatchGroup {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct YAMLMatch {
+  #[serde(default)]
+  pub label: Option<String>,
+
   #[serde(default)]
   pub trigger: Option<String>,
 
@@ -122,6 +125,12 @@ pub struct YAMLVariable {
 
   #[serde(default = "default_params")]
   pub params: Mapping,
+
+  #[serde(default)]
+  pub inject_vars: Option<bool>,
+
+  #[serde(default)]
+  pub depends_on: Vec<String>,
 }
 
 fn default_params() -> Mapping {

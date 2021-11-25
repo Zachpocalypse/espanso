@@ -26,25 +26,28 @@ pub mod types {
     pub id: String,
     pub label: String,
     pub trigger: Option<String>,
+    pub is_builtin: bool,
   }
 
   #[derive(Debug)]
   pub struct Search {
     pub title: String,
     pub icon: Option<String>,
+    pub hint: Option<String>,
     pub items: Vec<SearchItem>,
   }
 }
 
 #[allow(dead_code)]
 mod interop {
-  use super::types;
   use super::super::interop::*;
+  use super::types;
   use std::ffi::{c_void, CString};
 
   pub(crate) struct OwnedSearch {
     title: CString,
     icon_path: CString,
+    hint: CString,
     items: Vec<OwnedSearchItem>,
     pub(crate) interop_items: Vec<SearchItem>,
     _interop: Box<SearchMetadata>,
@@ -79,15 +82,31 @@ mod interop {
         std::ptr::null()
       };
 
+      let hint = if let Some(hint) = search.hint.as_ref() {
+        hint.clone()
+      } else {
+        "".to_owned()
+      };
+
+      let hint = CString::new(hint).expect("unable to convert search icon to CString");
+
+      let hint_ptr = if search.hint.is_some() {
+        hint.as_ptr()
+      } else {
+        std::ptr::null()
+      };
+
       let _interop = Box::new(SearchMetadata {
         iconPath: icon_path_ptr,
         windowTitle: title.as_ptr(),
+        hintText: hint_ptr,
       });
 
       Self {
         title,
-        items,
         icon_path,
+        hint,
+        items,
         interop_items,
         _interop,
       }

@@ -50,9 +50,9 @@ impl Default for Match {
 
 impl Match {
   // TODO: test
-  pub fn description<'a>(&'a self) -> &'a str {
+  pub fn description(&self) -> &str {
     if let Some(label) = &self.label {
-      &label
+      label
     } else if let MatchEffect::Text(text_effect) = &self.effect {
       &text_effect.replace
     } else if let MatchEffect::Image(_) = &self.effect {
@@ -63,14 +63,8 @@ impl Match {
   }
 
   // TODO: test
-  pub fn cause_description<'a>(&'a self) -> Option<&'a str> {
-    if let MatchCause::Trigger(trigger_cause) = &self.cause {
-      trigger_cause.triggers.first().map(|s| s.as_str())
-    } else {
-      None
-    }
-    // TODO: insert rendering for hotkey/shortcut
-    // TODO: insert rendering for regex? I'm worried it might be too long
+  pub fn cause_description(&self) -> Option<&str> {
+    self.cause.description()
   }
 }
 
@@ -82,6 +76,30 @@ pub enum MatchCause {
   Trigger(TriggerCause),
   Regex(RegexCause),
   // TODO: shortcut
+}
+
+impl MatchCause {
+  // TODO: test
+  pub fn description(&self) -> Option<&str> {
+    if let MatchCause::Trigger(trigger_cause) = &self {
+      trigger_cause.triggers.first().map(|s| s.as_str())
+    } else {
+      None
+    }
+    // TODO: insert rendering for hotkey/shortcut
+    // TODO: insert rendering for regex? I'm worried it might be too long
+  }
+
+  // TODO: test
+  pub fn long_description(&self) -> String {
+    if let MatchCause::Trigger(trigger_cause) = &self {
+      format!("triggers: {:?}", trigger_cause.triggers)
+    } else {
+      "No description available".to_owned()
+    }
+    // TODO: insert rendering for hotkey/shortcut
+    // TODO: insert rendering for regex? I'm worried it might be too long
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -187,6 +205,8 @@ pub struct Variable {
   pub name: String,
   pub var_type: String,
   pub params: Params,
+  pub inject_vars: bool,
+  pub depends_on: Vec<String>,
 }
 
 impl Default for Variable {
@@ -196,6 +216,8 @@ impl Default for Variable {
       name: String::new(),
       var_type: String::new(),
       params: Params::new(),
+      inject_vars: true,
+      depends_on: Vec::new(),
     }
   }
 }

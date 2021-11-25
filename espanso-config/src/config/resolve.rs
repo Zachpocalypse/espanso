@@ -25,22 +25,23 @@ use super::{
   parse::ParsedConfig,
   path::calculate_paths,
   util::os_matches,
-  AppProperties, Backend, Config, ToggleKey,
+  AppProperties, Backend, Config, RMLVOConfig, ToggleKey,
 };
 use crate::{counter::next_id, merge};
 use anyhow::Result;
 use log::error;
 use regex::Regex;
-use std::iter::FromIterator;
+use std::path::PathBuf;
 use std::{collections::HashSet, path::Path};
 use thiserror::Error;
 
-const STANDARD_INCLUDES: &[&str] = &["../match/**/*.yml"];
-const STANDARD_EXCLUDES: &[&str] = &["../match/**/_*.yml"];
+const STANDARD_INCLUDES: &[&str] = &["../match/**/[!_]*.yml"];
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedConfig {
   parsed: ParsedConfig,
+
+  source_path: Option<PathBuf>,
 
   // Generated properties
   id: i32,
@@ -55,6 +56,7 @@ impl Default for ResolvedConfig {
   fn default() -> Self {
     Self {
       parsed: Default::default(),
+      source_path: None,
       id: 0,
       match_paths: Vec::new(),
       filter_title: None,
@@ -70,7 +72,17 @@ impl Config for ResolvedConfig {
   }
 
   fn label(&self) -> &str {
-    self.parsed.label.as_deref().unwrap_or("none")
+    if let Some(label) = self.parsed.label.as_deref() {
+      return label;
+    }
+
+    if let Some(source_path) = self.source_path.as_ref() {
+      if let Some(source_path) = source_path.to_str() {
+        return source_path;
+      }
+    }
+
+    "none"
   }
 
   fn match_paths(&self) -> &[String] {
@@ -144,6 +156,10 @@ impl Config for ResolvedConfig {
         Backend::Auto
       }
     }
+  }
+
+  fn enable(&self) -> bool {
+    self.parsed.enable.unwrap_or(true)
   }
 
   fn clipboard_threshold(&self) -> usize {
@@ -232,20 +248,87 @@ impl Config for ResolvedConfig {
   }
 
   fn word_separators(&self) -> Vec<String> {
-    self.parsed.word_separators.clone().unwrap_or(vec![
-      " ".to_string(),
-      ",".to_string(),
-      ".".to_string(),
-      "?".to_string(),
-      "!".to_string(),
-      "\r".to_string(),
-      "\n".to_string(),
-      (22u8 as char).to_string(),
-    ])
+    self.parsed.word_separators.clone().unwrap_or_else(|| {
+      vec![
+        " ".to_string(),
+        ",".to_string(),
+        ".".to_string(),
+        "?".to_string(),
+        "!".to_string(),
+        "\r".to_string(),
+        "\n".to_string(),
+        (22u8 as char).to_string(),
+      ]
+    })
   }
 
   fn backspace_limit(&self) -> usize {
     self.parsed.backspace_limit.unwrap_or(5)
+  }
+
+  fn apply_patch(&self) -> bool {
+    self.parsed.apply_patch.unwrap_or(true)
+  }
+
+  fn keyboard_layout(&self) -> Option<RMLVOConfig> {
+    self
+      .parsed
+      .keyboard_layout
+      .as_ref()
+      .map(|layout| RMLVOConfig {
+        rules: layout.get("rules").map(String::from),
+        model: layout.get("model").map(String::from),
+        layout: layout.get("layout").map(String::from),
+        variant: layout.get("variant").map(String::from),
+        options: layout.get("options").map(String::from),
+      })
+  }
+
+  fn search_trigger(&self) -> Option<String> {
+    match self.parsed.search_trigger.as_deref() {
+      Some("OFF") | Some("off") => None,
+      Some(x) => Some(x.to_string()),
+      None => Some("jkj".to_string()),
+    }
+  }
+
+  fn search_shortcut(&self) -> Option<String> {
+    match self.parsed.search_shortcut.as_deref() {
+      Some("OFF") | Some("off") => None,
+      Some(x) => Some(x.to_string()),
+      None => Some("ALT+SPACE".to_string()),
+    }
+  }
+
+  fn undo_backspace(&self) -> bool {
+    self.parsed.undo_backspace.unwrap_or(true)
+  }
+
+  fn show_icon(&self) -> bool {
+    self.parsed.show_icon.unwrap_or(true)
+  }
+
+  fn show_notifications(&self) -> bool {
+    self.parsed.show_notifications.unwrap_or(true)
+  }
+
+  fn secure_input_notification(&self) -> bool {
+    self.parsed.secure_input_notification.unwrap_or(true)
+  }
+
+  fn win32_exclude_orphan_events(&self) -> bool {
+    self.parsed.win32_exclude_orphan_events.unwrap_or(true)
+  }
+
+  fn evdev_modifier_delay(&self) -> Option<usize> {
+    self.parsed.evdev_modifier_delay
+  }
+
+  fn win32_keyboard_layout_cache_interval(&self) -> i64 {
+    self
+      .parsed
+      .win32_keyboard_layout_cache_interval
+      .unwrap_or(2000)
   }
 }
 
@@ -287,6 +370,7 @@ impl ResolvedConfig {
 
     Ok(Self {
       parsed: config,
+      source_path: Some(path.to_owned()),
       id: next_id(),
       match_paths,
       filter_title,
@@ -304,19 +388,31 @@ impl ResolvedConfig {
       // Fields
       label,
       backend,
+      enable,
       clipboard_threshold,
       auto_restart,
       pre_paste_delay,
       preserve_clipboard,
       restore_clipboard_delay,
       paste_shortcut,
+      apply_patch,
       paste_shortcut_event_delay,
       disable_x11_fast_inject,
       toggle_key,
       inject_delay,
       key_delay,
+      evdev_modifier_delay,
       word_separators,
       backspace_limit,
+      keyboard_layout,
+      search_trigger,
+      search_shortcut,
+      undo_backspace,
+      show_icon,
+      show_notifications,
+      secure_input_notification,
+      win32_exclude_orphan_events,
+      win32_keyboard_layout_cache_interval,
       includes,
       excludes,
       extra_includes,
@@ -356,12 +452,6 @@ impl ResolvedConfig {
   fn aggregate_excludes(config: &ParsedConfig) -> HashSet<String> {
     let mut excludes = HashSet::new();
 
-    if config.use_standard_includes.is_none() || config.use_standard_includes.unwrap() {
-      STANDARD_EXCLUDES.iter().for_each(|exclude| {
-        excludes.insert(exclude.to_string());
-      })
-    }
-
     if let Some(yaml_excludes) = config.excludes.as_ref() {
       yaml_excludes.iter().for_each(|exclude| {
         excludes.insert(exclude.to_string());
@@ -385,7 +475,10 @@ impl ResolvedConfig {
     let exclude_paths = calculate_paths(base_dir, excludes.iter());
     let include_paths = calculate_paths(base_dir, includes.iter());
 
-    HashSet::from_iter(include_paths.difference(&exclude_paths).cloned())
+    include_paths
+      .difference(&exclude_paths)
+      .cloned()
+      .collect::<HashSet<_>>()
   }
 }
 
@@ -400,7 +493,6 @@ mod tests {
   use super::*;
   use crate::util::tests::use_test_directory;
   use std::fs::create_dir_all;
-  use std::iter::FromIterator;
 
   #[test]
   fn aggregate_includes_empty_config() {
@@ -408,7 +500,10 @@ mod tests {
       ResolvedConfig::aggregate_includes(&ParsedConfig {
         ..Default::default()
       }),
-      HashSet::from_iter(vec!["../match/**/*.yml".to_string(),].iter().cloned())
+      vec!["../match/**/[!_]*.yml".to_string(),]
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>()
     );
   }
 
@@ -430,11 +525,13 @@ mod tests {
         includes: Some(vec!["custom/*.yml".to_string()]),
         ..Default::default()
       }),
-      HashSet::from_iter(
-        vec!["../match/**/*.yml".to_string(), "custom/*.yml".to_string()]
-          .iter()
-          .cloned()
-      )
+      vec![
+        "../match/**/[!_]*.yml".to_string(),
+        "custom/*.yml".to_string()
+      ]
+      .iter()
+      .cloned()
+      .collect::<HashSet<_>>()
     );
   }
 
@@ -445,11 +542,13 @@ mod tests {
         extra_includes: Some(vec!["custom/*.yml".to_string()]),
         ..Default::default()
       }),
-      HashSet::from_iter(
-        vec!["../match/**/*.yml".to_string(), "custom/*.yml".to_string()]
-          .iter()
-          .cloned()
-      )
+      vec![
+        "../match/**/[!_]*.yml".to_string(),
+        "custom/*.yml".to_string()
+      ]
+      .iter()
+      .cloned()
+      .collect::<HashSet<_>>()
     );
   }
 
@@ -461,15 +560,14 @@ mod tests {
         extra_includes: Some(vec!["custom/*.yml".to_string()]),
         ..Default::default()
       }),
-      HashSet::from_iter(
-        vec![
-          "../match/**/*.yml".to_string(),
-          "custom/*.yml".to_string(),
-          "sub/*.yml".to_string()
-        ]
-        .iter()
-        .cloned()
-      )
+      vec![
+        "../match/**/[!_]*.yml".to_string(),
+        "custom/*.yml".to_string(),
+        "sub/*.yml".to_string()
+      ]
+      .iter()
+      .cloned()
+      .collect::<HashSet<_>>()
     );
   }
 
@@ -478,8 +576,9 @@ mod tests {
     assert_eq!(
       ResolvedConfig::aggregate_excludes(&ParsedConfig {
         ..Default::default()
-      }),
-      HashSet::from_iter(vec!["../match/**/_*.yml".to_string(),].iter().cloned())
+      })
+      .len(),
+      0
     );
   }
 
@@ -501,11 +600,10 @@ mod tests {
         excludes: Some(vec!["custom/*.yml".to_string()]),
         ..Default::default()
       }),
-      HashSet::from_iter(
-        vec!["../match/**/_*.yml".to_string(), "custom/*.yml".to_string()]
-          .iter()
-          .cloned()
-      )
+      vec!["custom/*.yml".to_string()]
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>()
     );
   }
 
@@ -516,11 +614,10 @@ mod tests {
         extra_excludes: Some(vec!["custom/*.yml".to_string()]),
         ..Default::default()
       }),
-      HashSet::from_iter(
-        vec!["../match/**/_*.yml".to_string(), "custom/*.yml".to_string()]
-          .iter()
-          .cloned()
-      )
+      vec!["custom/*.yml".to_string()]
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>()
     );
   }
 
@@ -532,15 +629,10 @@ mod tests {
         extra_excludes: Some(vec!["custom/*.yml".to_string()]),
         ..Default::default()
       }),
-      HashSet::from_iter(
-        vec![
-          "../match/**/_*.yml".to_string(),
-          "custom/*.yml".to_string(),
-          "sub/*.yml".to_string()
-        ]
+      vec!["custom/*.yml".to_string(), "sub/*.yml".to_string()]
         .iter()
         .cloned()
-      )
+        .collect::<HashSet<_>>()
     );
   }
 
@@ -664,6 +756,41 @@ mod tests {
       let expected = vec![base_file.to_string_lossy().to_string()];
 
       assert_eq!(parent.match_paths(), expected.as_slice());
+    });
+  }
+
+  #[test]
+  fn match_paths_generated_correctly_with_underscore_files() {
+    use_test_directory(|_, match_dir, config_dir| {
+      let sub_dir = match_dir.join("sub");
+      create_dir_all(&sub_dir).unwrap();
+
+      let base_file = match_dir.join("base.yml");
+      std::fs::write(&base_file, "test").unwrap();
+      let another_file = match_dir.join("another.yml");
+      std::fs::write(&another_file, "test").unwrap();
+      let under_file = match_dir.join("_sub.yml");
+      std::fs::write(&under_file, "test").unwrap();
+      let sub_file = sub_dir.join("sub.yml");
+      std::fs::write(&sub_file, "test").unwrap();
+
+      let config_file = config_dir.join("default.yml");
+      std::fs::write(&config_file, "extra_includes: ['../match/_sub.yml']").unwrap();
+
+      let config = ResolvedConfig::load(&config_file, None).unwrap();
+
+      let mut expected = vec![
+        base_file.to_string_lossy().to_string(),
+        another_file.to_string_lossy().to_string(),
+        sub_file.to_string_lossy().to_string(),
+        under_file.to_string_lossy().to_string(),
+      ];
+      expected.sort();
+
+      let mut result = config.match_paths().to_vec();
+      result.sort();
+
+      assert_eq!(result, expected.as_slice());
     });
   }
 

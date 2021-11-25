@@ -15,4 +15,7 @@ members = [
   "espanso-modulo",
   "espanso-migrate",
   "espanso-mac-utils",
+  "espanso-kvs",
+  "espanso-engine",
+  "espanso-package",
 ]

@@ -48,10 +48,8 @@ impl FileProxy {
 
   pub fn set_output_file(&self, path: &Path, read_only: bool, create_new: bool) -> Result<()> {
     // Remove previous log, if present
-    if create_new && !read_only {
-      if path.is_file() {
-        std::fs::remove_file(path)?;
-      }
+    if create_new && !read_only && path.is_file() {
+      std::fs::remove_file(path)?;
     }
 
     let mut log_file = OpenOptions::new()
@@ -64,7 +62,7 @@ impl FileProxy {
 
     // Transfer the log content that has been buffered into the file
     if let Output::Memory(buffered) = &mut (*lock) {
-      log_file.write_all(&buffered)?;
+      log_file.write_all(buffered)?;
       buffered.clear();
     }
     *lock = Output::File(log_file);
@@ -78,12 +76,8 @@ impl Write for FileProxy {
       Ok(mut lock) => {
         match &mut (*lock) {
           // Write to the memory buffer until a file is ready
-          Output::Memory(buffer) => {
-            buffer.write(buf)
-          }
-          Output::File(output) => {
-            output.write(buf)
-          }
+          Output::Memory(buffer) => buffer.write(buf),
+          Output::File(output) => output.write(buf),
         }
       }
       Err(_) => Err(std::io::Error::new(
@@ -95,20 +89,38 @@ impl Write for FileProxy {
 
   fn flush(&mut self) -> std::io::Result<()> {
     match self.output.lock() {
-      Ok(mut lock) => {
-        match &mut (*lock) {
-          Output::Memory(buffer) => {
-            buffer.flush()
-          }
-          Output::File(output) => {
-            output.flush()
-          }
-        }
-      }
+      Ok(mut lock) => match &mut (*lock) {
+        Output::Memory(buffer) => buffer.flush(),
+        Output::File(output) => output.flush(),
+      },
       Err(_) => Err(std::io::Error::new(
         std::io::ErrorKind::Other,
         "lock poison error",
       )),
     }
+  }
+}
+
+#[macro_export]
+macro_rules! info_println {
+  ($($tts:tt)*) => {
+    println!($($tts)*);
+    log::info!($($tts)*);
+  }
+}
+
+#[macro_export]
+macro_rules! warn_eprintln {
+  ($($tts:tt)*) => {
+    eprintln!($($tts)*);
+    log::warn!($($tts)*);
+  }
+}
+
+#[macro_export]
+macro_rules! error_eprintln {
+  ($($tts:tt)*) => {
+    eprintln!($($tts)*);
+    log::error!($($tts)*);
   }
 }

@@ -17,7 +17,7 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 pub mod extension;
 
@@ -27,9 +27,7 @@ use espanso_config::{
 };
 use espanso_render::{CasingStyle, Context, RenderOptions, Template, Value, Variable};
 
-use crate::{
-  engine::process::{Renderer, RendererError},
-};
+use espanso_engine::process::{Renderer, RendererError};
 
 pub trait MatchProvider<'a> {
   fn matches(&self) -> Vec<&'a Match>;
@@ -37,8 +35,8 @@ pub trait MatchProvider<'a> {
 }
 
 pub trait ConfigProvider<'a> {
-  fn configs(&self) -> Vec<(&'a dyn Config, MatchSet)>;
-  fn active(&self) -> (&'a dyn Config, MatchSet);
+  fn configs(&self) -> Vec<(Arc<dyn Config>, MatchSet)>;
+  fn active(&self) -> (Arc<dyn Config>, MatchSet);
 }
 
 pub struct RendererAdapter<'a> {
@@ -88,9 +86,9 @@ fn generate_global_vars_map(config_provider: &dyn ConfigProvider) -> HashMap<i32
 
   for (_, match_set) in config_provider.configs() {
     for var in match_set.global_vars.iter() {
-      if !global_vars_map.contains_key(&var.id) {
-        global_vars_map.insert(var.id, convert_var((*var).clone()));
-      }
+      global_vars_map
+        .entry(var.id)
+        .or_insert_with(|| convert_var((*var).clone()));
     }
   }
 
@@ -119,8 +117,8 @@ fn generate_context<'a>(
   }
 
   Context {
-    templates,
     global_vars,
+    templates,
   }
 }
 
@@ -153,6 +151,8 @@ fn convert_var(var: espanso_config::matches::Variable) -> espanso_render::Variab
     name: var.name,
     var_type: var.var_type,
     params: convert_params(var.params),
+    inject_vars: var.inject_vars,
+    depends_on: var.depends_on,
   }
 }
 
@@ -200,7 +200,7 @@ impl<'a> Renderer<'a> for RendererAdapter<'a> {
       let context = context_cache
         .entry(config.id())
         .or_insert_with(|| generate_context(&match_set, &self.template_map, &self.global_vars_map));
-      
+
       let raw_match = self.match_provider.get(match_id);
       let propagate_case = raw_match.map(is_propagate_case).unwrap_or(false);
       let preferred_uppercasing_style = raw_match.and_then(extract_uppercasing_style);
@@ -221,11 +221,16 @@ impl<'a> Renderer<'a> for RendererAdapter<'a> {
         for (name, value) in trigger_vars {
           let mut params = espanso_render::Params::new();
           params.insert("echo".to_string(), Value::String(value));
-          augmented.vars.insert(0, Variable {
-            name,
-            var_type: "echo".to_string(),
-            params,
-          })
+          augmented.vars.insert(
+            0,
+            Variable {
+              name,
+              var_type: "echo".to_string(),
+              params,
+              inject_vars: false,
+              ..Default::default()
+            },
+          )
         }
         Some(augmented)
       } else {

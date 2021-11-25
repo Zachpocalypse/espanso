@@ -19,7 +19,7 @@
 
 use serde::Serialize;
 use serde_json::Value;
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 use crate::gui::{SearchItem, SearchUI};
 
@@ -31,17 +31,16 @@ pub struct ModuloSearchUI<'a> {
 
 impl<'a> ModuloSearchUI<'a> {
   pub fn new(manager: &'a ModuloManager) -> Self {
-    Self {
-      manager,
-    }
+    Self { manager }
   }
 }
 
 impl<'a> SearchUI for ModuloSearchUI<'a> {
-  fn show(&self, items: &[SearchItem]) -> anyhow::Result<Option<String>> {
+  fn show(&self, items: &[SearchItem], hint: Option<&str>) -> anyhow::Result<Option<String>> {
     let modulo_config = ModuloSearchConfig {
       title: "espanso",
-      items: convert_items(&items),
+      hint,
+      items: convert_items(items),
     };
 
     let json_config = serde_json::to_string(&modulo_config)?;
@@ -52,14 +51,12 @@ impl<'a> SearchUI for ModuloSearchUI<'a> {
     match json {
       Ok(json) => {
         if let Some(Value::String(selected_id)) = json.get("selected") {
-          return Ok(Some(selected_id.clone()));
+          Ok(Some(selected_id.clone()))
         } else {
-          return Ok(None);
+          Ok(None)
         }
       }
-      Err(error) => {
-        return Err(error.into());
-      }
+      Err(error) => Err(error.into()),
     }
   }
 }
@@ -67,6 +64,7 @@ impl<'a> SearchUI for ModuloSearchUI<'a> {
 #[derive(Debug, Serialize)]
 struct ModuloSearchConfig<'a> {
   title: &'a str,
+  hint: Option<&'a str>,
   items: Vec<ModuloSearchItemConfig<'a>>,
 }
 
@@ -75,13 +73,18 @@ struct ModuloSearchItemConfig<'a> {
   id: &'a str,
   label: &'a str,
   trigger: Option<&'a str>,
+  is_builtin: bool,
 }
 
 // TODO: test
-fn convert_items<'a>(items: &'a [SearchItem]) -> Vec<ModuloSearchItemConfig<'a>> {
-  items.iter().map(|item| ModuloSearchItemConfig {
-    id: &item.id,
-    label: &item.label, 
-    trigger: item.tag.as_deref(), 
-  }).collect()
+fn convert_items(items: &[SearchItem]) -> Vec<ModuloSearchItemConfig> {
+  items
+    .iter()
+    .map(|item| ModuloSearchItemConfig {
+      id: &item.id,
+      label: &item.label,
+      trigger: item.tag.as_deref(),
+      is_builtin: item.is_builtin,
+    })
+    .collect()
 }

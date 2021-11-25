@@ -23,7 +23,7 @@ use espanso_clipboard::Clipboard;
 use espanso_inject::{keys::Key, InjectionOptions, Injector};
 use log::error;
 
-use crate::engine::{
+use espanso_engine::{
   dispatch::HtmlInjector,
   dispatch::{ImageInjector, TextInjector},
 };
@@ -74,7 +74,7 @@ impl<'a> ClipboardInjectorAdapter<'a> {
       } else {
         error!("'{}' is not a valid paste shortcut", custom_shortcut);
       }
-    } 
+    }
 
     let combination = if let Some(custom_combination) = custom_combination {
       custom_combination
@@ -89,6 +89,7 @@ impl<'a> ClipboardInjectorAdapter<'a> {
       InjectionOptions {
         delay: params.paste_shortcut_event_delay as i32,
         disable_fast_inject: params.disable_x11_fast_inject,
+        ..Default::default()
       },
     )?;
 
@@ -196,7 +197,7 @@ impl<'a> Drop for ClipboardRestoreGuard<'a> {
 }
 
 fn parse_combination(combination: &str) -> Option<Vec<Key>> {
-  let tokens = combination.split("+");
+  let tokens = combination.split('+');
   let mut keys: Vec<Key> = Vec::new();
   for token in tokens {
     keys.push(Key::parse(token)?);

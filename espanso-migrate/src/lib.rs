@@ -17,13 +17,16 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate lazy_static;
 
+#[allow(unused_imports)]
 #[macro_use]
 #[cfg(test)]
 extern crate include_dir;
 
+#[allow(unused_imports)]
 #[macro_use]
 #[cfg(test)]
 extern crate test_case;
@@ -197,11 +200,14 @@ mod tests {
   static BASE_CASE: Dir = include_dir!("test/base");
   static ALL_PARAMS_CASE: Dir = include_dir!("test/all_params");
   static OTHER_DIRS_CASE: Dir = include_dir!("test/other_dirs");
+  static FORM_SYNTAX: Dir = include_dir!("test/form_syntax");
 
+  #[allow(clippy::unused_unit)]
   #[test_case(&SIMPLE_CASE; "simple case")]
   #[test_case(&BASE_CASE; "base case")]
   #[test_case(&ALL_PARAMS_CASE; "all config parameters case")]
   #[test_case(&OTHER_DIRS_CASE; "other directories case")]
+  #[test_case(&FORM_SYNTAX; "form syntax")]
   fn test_migration(test_data: &Dir) {
     run_with_temp_dir(test_data, |legacy, expected| {
       let tmp_out_dir = TempDir::new("espanso-migrate-out").unwrap();
@@ -217,7 +223,7 @@ mod tests {
       for (file, converted) in to_sorted_list(converted_files) {
         assert_peq!(
           to_sorted_hash(&converted),
-          to_sorted_hash(&expected_files.get(&file).unwrap())
+          to_sorted_hash(expected_files.get(&file).unwrap())
         );
       }
 

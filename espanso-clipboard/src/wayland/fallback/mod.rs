@@ -26,7 +26,7 @@ use std::{
 
 use crate::{Clipboard, ClipboardOptions};
 use anyhow::Result;
-use log::error;
+use log::{error, warn};
 use std::process::Command;
 use thiserror::Error;
 use wait_timeout::ChildExt;
@@ -49,7 +49,15 @@ impl WaylandFallbackClipboard {
 
     // Try to connect to the wayland display
     let wayland_socket = if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-      PathBuf::from(runtime_dir).join("wayland-0")
+      let wayland_display = if let Ok(display) = std::env::var("WAYLAND_DISPLAY") {
+        display
+      } else {
+        warn!("Could not determine wayland display from WAYLAND_DISPLAY env variable, falling back to 'wayland-0'");
+        warn!("Note that this might not work on some systems.");
+        "wayland-0".to_string()
+      };
+
+      PathBuf::from(runtime_dir).join(wayland_display)
     } else {
       error!("environment variable XDG_RUNTIME_DIR is missing, can't initialize the clipboard");
       return Err(WaylandFallbackClipboardError::MissingEnvVariable().into());
@@ -122,21 +130,31 @@ impl Clipboard for WaylandFallbackClipboard {
     let mut data = Vec::new();
     file.read_to_end(&mut data)?;
 
-    self.invoke_command_with_timeout(&mut Command::new("wl-copy").arg("--type").arg("image/png"), &data, "wl-copy")
+    self.invoke_command_with_timeout(
+      &mut Command::new("wl-copy").arg("--type").arg("image/png"),
+      &data,
+      "wl-copy",
+    )
   }
 
   fn set_html(&self, html: &str, _fallback_text: Option<&str>) -> anyhow::Result<()> {
-    self.invoke_command_with_timeout(&mut Command::new("wl-copy").arg("--type").arg("text/html"), html.as_bytes(), "wl-copy")
+    self.invoke_command_with_timeout(
+      &mut Command::new("wl-copy").arg("--type").arg("text/html"),
+      html.as_bytes(),
+      "wl-copy",
+    )
   }
 }
 
 impl WaylandFallbackClipboard {
-  fn invoke_command_with_timeout(&self, command: &mut Command, data: &[u8], name: &str) -> Result<()> {
+  fn invoke_command_with_timeout(
+    &self,
+    command: &mut Command,
+    data: &[u8],
+    name: &str,
+  ) -> Result<()> {
     let timeout = std::time::Duration::from_millis(self.command_timeout);
-    match command
-      .stdin(Stdio::piped())
-      .spawn()
-    {
+    match command.stdin(Stdio::piped()).spawn() {
       Ok(mut child) => {
         if let Some(stdin) = child.stdin.as_mut() {
           stdin.write_all(data)?;

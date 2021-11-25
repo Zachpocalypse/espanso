@@ -2,9 +2,11 @@
 // https://github.com/xkbcommon/libxkbcommon/blob/master/tools/interactive-evdev.c
 
 use anyhow::Result;
-use libc::{input_event, size_t, ssize_t, EWOULDBLOCK, O_CLOEXEC, O_NONBLOCK, O_RDONLY};
+use libc::{input_event, size_t, ssize_t, ENODEV, EWOULDBLOCK, O_CLOEXEC, O_NONBLOCK, O_RDONLY};
 use log::trace;
 use scopeguard::ScopeGuard;
+use std::collections::HashMap;
+use std::os::raw::c_char;
 use std::os::unix::io::AsRawFd;
 use std::{
   ffi::{c_void, CStr},
@@ -13,6 +15,7 @@ use std::{
 use std::{fs::File, os::unix::fs::OpenOptionsExt};
 use thiserror::Error;
 
+use super::sync::ModifiersState;
 use super::{
   ffi::{
     is_keyboard_or_mouse, xkb_key_direction, xkb_keycode_t, xkb_keymap_key_repeats, xkb_state,
@@ -124,7 +127,11 @@ impl Device {
     }
 
     if len < 0 && unsafe { *errno_ptr } != EWOULDBLOCK {
-      return Err(DeviceError::BlockingReadOperation().into());
+      if unsafe { *errno_ptr } == ENODEV {
+        return Err(DeviceError::FailedReadNoSuchDevice.into());
+      }
+
+      return Err(DeviceError::FailedRead(unsafe { *errno_ptr }).into());
     }
 
     Ok(events)
@@ -138,7 +145,7 @@ impl Device {
     let is_down = value == KEY_STATE_PRESS;
 
     // Check if the current event originated from a mouse
-    if code >= 0x110 && code <= 0x117 {
+    if (0x110..=0x117).contains(&code) {
       // Mouse event
       return Some(RawInputEvent::Mouse(RawMouseEvent { code, is_down }));
     }
@@ -148,7 +155,7 @@ impl Device {
     let keycode: xkb_keycode_t = EVDEV_OFFSET as u32 + code as u32;
     let keymap = unsafe { xkb_state_get_keymap(self.get_state()) };
 
-    if value == KEY_STATE_REPEAT && unsafe { xkb_keymap_key_repeats(keymap, keycode) } != 0 {
+    if value == KEY_STATE_REPEAT && unsafe { xkb_keymap_key_repeats(keymap, keycode) } == 0 {
       return None;
     }
 
@@ -158,16 +165,16 @@ impl Device {
     }
 
     // Extract the utf8 char
-    let mut buffer: [u8; 16] = [0; 16];
+    let mut buffer: [c_char; 16] = [0; 16];
     unsafe {
       xkb_state_key_get_utf8(
         self.get_state(),
         keycode,
-        buffer.as_mut_ptr() as *mut i8,
+        buffer.as_mut_ptr(),
         std::mem::size_of_val(&buffer),
       )
     };
-    let content_raw = unsafe { CStr::from_ptr(buffer.as_ptr() as *mut i8) };
+    let content_raw = unsafe { CStr::from_ptr(buffer.as_ptr()) };
     let content = content_raw.to_string_lossy().to_string();
 
     let event = RawKeyboardEvent {
@@ -184,6 +191,84 @@ impl Device {
     }
 
     Some(RawInputEvent::Keyboard(event))
+  }
+
+  pub fn update_key(&mut self, code: u32, pressed: bool) {
+    let direction = if pressed {
+      super::ffi::xkb_key_direction::DOWN
+    } else {
+      super::ffi::xkb_key_direction::UP
+    };
+    unsafe {
+      xkb_state_update_key(self.get_state(), code, direction);
+    }
+  }
+
+  pub fn update_modifier_state(
+    &mut self,
+    modifiers_state: &ModifiersState,
+    modifiers_map: &HashMap<String, u32>,
+  ) {
+    if modifiers_state.alt {
+      self.update_key(
+        *modifiers_map
+          .get("alt")
+          .expect("unable to find modifiers key in map"),
+        true,
+      );
+    }
+    if modifiers_state.ctrl {
+      self.update_key(
+        *modifiers_map
+          .get("ctrl")
+          .expect("unable to find modifiers key in map"),
+        true,
+      );
+    }
+    if modifiers_state.meta {
+      self.update_key(
+        *modifiers_map
+          .get("meta")
+          .expect("unable to find modifiers key in map"),
+        true,
+      );
+    }
+    if modifiers_state.num_lock {
+      self.update_key(
+        *modifiers_map
+          .get("num_lock")
+          .expect("unable to find modifiers key in map"),
+        true,
+      );
+      self.update_key(
+        *modifiers_map
+          .get("num_lock")
+          .expect("unable to find modifiers key in map"),
+        false,
+      );
+    }
+    if modifiers_state.shift {
+      self.update_key(
+        *modifiers_map
+          .get("shift")
+          .expect("unable to find modifiers key in map"),
+        true,
+      );
+    }
+    if modifiers_state.caps_lock {
+      self.update_key(
+        *modifiers_map
+          .get("caps_lock")
+          .expect("unable to find modifiers key in map"),
+        true,
+      );
+      self.update_key(
+        *modifiers_map
+          .get("caps_lock")
+          .expect("unable to find modifiers key in map"),
+        false,
+      );
+    }
   }
 }
 
@@ -241,6 +326,9 @@ pub enum DeviceError {
   #[error("no devices found")]
   NoDevicesFound(),
 
-  #[error("read operation can't block device")]
-  BlockingReadOperation(),
+  #[error("read operation failed with code: `{0}`")]
+  FailedRead(i32),
+
+  #[error("read operation failed: ENODEV No such device")]
+  FailedReadNoSuchDevice,
 }

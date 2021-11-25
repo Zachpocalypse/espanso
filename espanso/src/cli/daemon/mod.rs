@@ -27,21 +27,30 @@ use espanso_ipc::IPCClient;
 use espanso_path::Paths;
 use log::{error, info, warn};
 
-use crate::{VERSION, exit_code::{
-    DAEMON_ALREADY_RUNNING, DAEMON_GENERAL_ERROR, DAEMON_LEGACY_ALREADY_RUNNING, DAEMON_SUCCESS,
+use crate::{
+  cli::util::{prevent_running_as_root_on_macos, CommandExt},
+  common_flags::*,
+  exit_code::{
+    DAEMON_ALREADY_RUNNING, DAEMON_FATAL_CONFIG_ERROR, DAEMON_GENERAL_ERROR,
+    DAEMON_LEGACY_ALREADY_RUNNING, DAEMON_SUCCESS, WORKER_ERROR_EXIT_NO_CODE,
     WORKER_EXIT_ALL_PROCESSES, WORKER_RESTART, WORKER_SUCCESS,
-  }, ipc::{create_ipc_client_to_worker, IPCEvent}, lock::{acquire_daemon_lock, acquire_legacy_lock, acquire_worker_lock}};
+  },
+  ipc::{create_ipc_client_to_worker, IPCEvent},
+  lock::{acquire_daemon_lock, acquire_legacy_lock, acquire_worker_lock},
+  VERSION,
+};
 
-use super::{CliModule, CliModuleArgs};
+use super::{CliModule, CliModuleArgs, PathsOverrides};
 
 mod ipc;
+mod keyboard_layout_watcher;
+mod troubleshoot;
 mod watcher;
 
 pub fn new() -> CliModule {
   #[allow(clippy::needless_update)]
   CliModule {
     requires_paths: true,
-    requires_config: true,
     enable_logs: true,
     log_mode: super::LogMode::CleanAndAppend,
     subcommand: "daemon".to_string(),
@@ -51,10 +60,12 @@ pub fn new() -> CliModule {
 }
 
 fn daemon_main(args: CliModuleArgs) -> i32 {
+  prevent_running_as_root_on_macos();
+
   let paths = args.paths.expect("missing paths in daemon main");
-  let config_store = args
-    .config_store
-    .expect("missing config store in worker main");
+  let paths_overrides = args
+    .paths_overrides
+    .expect("missing paths_overrides in daemon main");
 
   // Make sure only one instance of the daemon is running
   let lock_file = acquire_daemon_lock(&paths.runtime);
@@ -74,6 +85,43 @@ fn daemon_main(args: CliModuleArgs) -> i32 {
 
   // TODO: we might need to check preconditions: accessibility on macOS, presence of binaries on Linux, etc
 
+  // This variable holds the current troubleshooter guard.
+  // When a guard is dropped, the troubleshooting GUI is killed
+  // so this ensures that there is only one troubleshooter running
+  // at a given time.
+  let mut _current_troubleshoot_guard = None;
+
+  let (watcher_notify, watcher_signal) = unbounded::<()>();
+
+  watcher::initialize_and_spawn(&paths.config, watcher_notify)
+    .expect("unable to initialize config watcher thread");
+
+  let (_keyboard_layout_watcher_notify, keyboard_layout_watcher_signal) = unbounded::<()>();
+
+  #[allow(clippy::redundant_clone)]
+  // IMPORTANT: Here we clone the channel instead of simply passing it to avoid
+  // dropping the channel immediately on those platforms that don't support the
+  // layout watcher (currently Windows and macOS).
+  // Otherwise, the select below would always return an error because the channel is closed.
+  keyboard_layout_watcher::initialize_and_spawn(_keyboard_layout_watcher_notify.clone()) // DON'T REMOVE THE CLONE!
+    .expect("unable to initialize keyboard layout watcher thread");
+
+  let config_store =
+    match troubleshoot::load_config_or_troubleshoot_until_config_is_correct_or_abort(
+      &paths,
+      &paths_overrides,
+      watcher_signal.clone(),
+    ) {
+      Ok((result, guard)) => {
+        _current_troubleshoot_guard = guard;
+        result.config_store
+      }
+      Err(err) => {
+        error!("critical error while loading config: {}", err);
+        return DAEMON_FATAL_CONFIG_ERROR;
+      }
+    };
+
   info!("espanso version: {}", VERSION);
   // TODO: print os system and version? (with os_info crate)
 
@@ -83,55 +131,45 @@ fn daemon_main(args: CliModuleArgs) -> i32 {
 
   // TODO: register signals to terminate the worker if the daemon terminates
 
-  spawn_worker(&paths, exit_notify.clone());
+  spawn_worker(&paths_overrides, exit_notify.clone(), None);
 
   ipc::initialize_and_spawn(&paths.runtime, exit_notify.clone())
     .expect("unable to initialize ipc server for daemon");
 
-  let (watcher_notify, watcher_signal) = unbounded::<()>();
-
-  if config_store.default().auto_restart() {
-    watcher::initialize_and_spawn(&paths.config, watcher_notify)
-      .expect("unable to initialize config watcher thread");
-  }
-
   loop {
     select! {
       recv(watcher_signal) -> _ => {
+        if !config_store.default().auto_restart() {
+          continue;
+        }
+
         info!("configuration change detected, restarting worker process...");
 
-        match create_ipc_client_to_worker(&paths.runtime) {
-          Ok(mut worker_ipc) => {
-            if let Err(err) = worker_ipc.send_async(IPCEvent::Exit) {
-              error!(
-                "unable to send termination signal to worker process: {}",
-                err
-              );
-            }
+        // Before killing the previous worker, we make sure there is no fatal error
+        // in the configs.
+        let should_restart_worker = match troubleshoot::load_config_or_troubleshoot(&paths, &paths_overrides) {
+          troubleshoot::LoadResult::Correct(_) => {
+            _current_troubleshoot_guard = None;
+            true
+          },
+          troubleshoot::LoadResult::Warning(_, guard) => {
+            _current_troubleshoot_guard = guard;
+            true
           }
-          Err(err) => {
-            error!("could not establish IPC connection with worker: {}", err);
+          troubleshoot::LoadResult::Fatal(guard) => {
+            _current_troubleshoot_guard = Some(guard);
+            error!("critical error while loading config, could not restart worker");
+            false
           }
-        }
+        };
 
-        // Wait until the worker process has terminated
-        let start = Instant::now();
-        let mut has_timed_out = true;
-        while start.elapsed() < std::time::Duration::from_secs(30) {
-          let lock_file = acquire_worker_lock(&paths.runtime);
-          if lock_file.is_some() {
-            has_timed_out = false;
-            break;
-          }
-
-          std::thread::sleep(std::time::Duration::from_millis(100));
+        if should_restart_worker {
+          restart_worker(&paths, &paths_overrides, exit_notify.clone(), Some(WORKER_START_REASON_CONFIG_CHANGED.to_string()));
         }
-
-        if !has_timed_out {
-          spawn_worker(&paths, exit_notify.clone());
-        } else {
-          error!("could not restart worker, as the exit process has timed out");
-        }
+      }
+      recv(keyboard_layout_watcher_signal) -> _ => {
+        info!("keyboard layout change detected, restarting worker...");
+        restart_worker(&paths, &paths_overrides, exit_notify.clone(), Some(WORKER_START_REASON_KEYBOARD_LAYOUT_CHANGED.to_string()));
       }
       recv(exit_signal) -> code => {
         match code {
@@ -143,7 +181,7 @@ fn daemon_main(args: CliModuleArgs) -> i32 {
               }
               WORKER_RESTART => {
                 info!("worker requested a restart, spawning a new one...");
-                spawn_worker(&paths, exit_notify.clone());
+                spawn_worker(&paths_overrides, exit_notify.clone(), Some(WORKER_START_REASON_MANUAL.to_string()));
               }
               _ => {
                 error!("received unexpected exit code from worker {}, exiting", code);
@@ -164,7 +202,7 @@ fn daemon_main(args: CliModuleArgs) -> i32 {
 }
 
 fn terminate_worker_if_already_running(runtime_dir: &Path) {
-  let lock_file = acquire_worker_lock(&runtime_dir);
+  let lock_file = acquire_worker_lock(runtime_dir);
   if lock_file.is_some() {
     return;
   }
@@ -200,34 +238,25 @@ fn terminate_worker_if_already_running(runtime_dir: &Path) {
   )
 }
 
-fn spawn_worker(paths: &Paths, exit_notify: Sender<i32>) {
+fn spawn_worker(
+  paths_overrides: &PathsOverrides,
+  exit_notify: Sender<i32>,
+  start_reason: Option<String>,
+) {
   info!("spawning the worker process...");
 
   let espanso_exe_path =
     std::env::current_exe().expect("unable to obtain espanso executable location");
 
   let mut command = Command::new(&espanso_exe_path.to_string_lossy().to_string());
-  command.args(&["worker", "--monitor-daemon"]);
-  command.env(
-    "ESPANSO_CONFIG_DIR",
-    paths.config.to_string_lossy().to_string(),
-  );
-  command.env(
-    "ESPANSO_PACKAGE_DIR",
-    paths.packages.to_string_lossy().to_string(),
-  );
-  command.env(
-    "ESPANSO_RUNTIME_DIR",
-    paths.runtime.to_string_lossy().to_string(),
-  );
 
-  // TODO: investigate if this is needed here, especially when invoking a form
-  // // On windows, we need to spawn the process as "Detached"
-  // #[cfg(target_os = "windows")]
-  // {
-  //   use std::os::windows::process::CommandExt;
-  //   //command.creation_flags(0x08000008); // CREATE_NO_WINDOW + DETACHED_PROCESS
-  // }
+  let mut args = vec!["worker", "--monitor-daemon"];
+  if let Some(start_reason) = &start_reason {
+    args.push("--start-reason");
+    args.push(start_reason);
+  }
+  command.args(&args);
+  command.with_paths_overrides(paths_overrides);
 
   let mut child = command.spawn().expect("unable to spawn worker process");
 
@@ -244,8 +273,52 @@ fn spawn_worker(paths: &Paths, exit_notify: Sender<i32>) {
               .send(code)
               .expect("unable to forward worker exit code");
           }
+        } else {
+          exit_notify
+            .send(WORKER_ERROR_EXIT_NO_CODE)
+            .expect("unable to forward worker exit code");
         }
       }
     })
     .expect("Unable to spawn worker monitor thread");
+}
+
+fn restart_worker(
+  paths: &Paths,
+  paths_overrides: &PathsOverrides,
+  exit_notify: Sender<i32>,
+  start_reason: Option<String>,
+) {
+  match create_ipc_client_to_worker(&paths.runtime) {
+    Ok(mut worker_ipc) => {
+      if let Err(err) = worker_ipc.send_async(IPCEvent::Exit) {
+        error!(
+          "unable to send termination signal to worker process: {}",
+          err
+        );
+      }
+    }
+    Err(err) => {
+      error!("could not establish IPC connection with worker: {}", err);
+    }
+  }
+
+  // Wait until the worker process has terminated
+  let start = Instant::now();
+  let mut has_timed_out = true;
+  while start.elapsed() < std::time::Duration::from_secs(30) {
+    let lock_file = acquire_worker_lock(&paths.runtime);
+    if lock_file.is_some() {
+      has_timed_out = false;
+      break;
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(100));
+  }
+
+  if !has_timed_out {
+    spawn_worker(paths_overrides, exit_notify, start_reason);
+  } else {
+    error!("could not restart worker, as the exit process has timed out");
+  }
 }

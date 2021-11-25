@@ -17,18 +17,22 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use espanso_config::matches::{Match};
+use espanso_engine::process::MatchSelector;
 use log::error;
 
-use crate::{
-  engine::process::MatchSelector,
-  gui::{SearchItem, SearchUI},
-};
+use crate::gui::{SearchItem, SearchUI};
 
 const MAX_LABEL_LEN: usize = 100;
 
 pub trait MatchProvider<'a> {
-  fn get_matches(&self, ids: &[i32]) -> Vec<&'a Match>;
+  fn get_matches(&self, ids: &[i32]) -> Vec<MatchSummary<'a>>;
+}
+
+pub struct MatchSummary<'a> {
+  pub id: i32,
+  pub label: &'a str,
+  pub tag: Option<&'a str>,
+  pub is_builtin: bool,
 }
 
 pub struct MatchSelectorAdapter<'a> {
@@ -46,23 +50,29 @@ impl<'a> MatchSelectorAdapter<'a> {
 }
 
 impl<'a> MatchSelector for MatchSelectorAdapter<'a> {
-  fn select(&self, matches_ids: &[i32]) -> Option<i32> {
-    let matches = self.match_provider.get_matches(&matches_ids);
+  fn select(&self, matches_ids: &[i32], is_search: bool) -> Option<i32> {
+    let matches = self.match_provider.get_matches(matches_ids);
     let search_items: Vec<SearchItem> = matches
-      .iter()
+      .into_iter()
       .map(|m| {
-        let label = m.description();
-        let clipped_label = &label[..std::cmp::min(label.len(), MAX_LABEL_LEN)];
+        let clipped_label = &m.label[..std::cmp::min(m.label.len(), MAX_LABEL_LEN)];
 
         SearchItem {
           id: m.id.to_string(),
           label: clipped_label.to_string(),
-          tag: m.cause_description().map(String::from),
+          tag: m.tag.map(String::from),
+          is_builtin: m.is_builtin,
         }
       })
       .collect();
 
-    match self.search_ui.show(&search_items) {
+    let hint = if is_search {
+      Some("Search matches by content or trigger (or type > to see commands)")
+    } else {
+      None
+    };
+
+    match self.search_ui.show(&search_items, hint) {
       Ok(Some(selected_id)) => match selected_id.parse::<i32>() {
         Ok(id) => Some(id),
         Err(err) => {

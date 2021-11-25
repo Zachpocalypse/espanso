@@ -57,10 +57,15 @@ pub struct InjectionOptions {
   // using XSendEvent rather than XTestFakeKeyEvent
   // NOTE: Only relevant on X11 linux systems.
   pub disable_fast_inject: bool,
+
+  // Used to set a modifier-specific delay.
+  // NOTE: Only relevant on Wayland systems.
+  pub evdev_modifier_delay: u32,
 }
 
 impl Default for InjectionOptions {
   fn default() -> Self {
+    #[allow(clippy::if_same_then_else)]
     let default_delay = if cfg!(target_os = "windows") {
       0
     } else if cfg!(target_os = "macos") {
@@ -78,6 +83,7 @@ impl Default for InjectionOptions {
     Self {
       delay: default_delay,
       disable_fast_inject: false,
+      evdev_modifier_delay: 10,
     }
   }
 }
@@ -98,6 +104,13 @@ pub struct InjectorCreationOptions {
   // Can be used to overwrite the keymap configuration
   // used by espanso to inject key presses.
   pub evdev_keyboard_rmlvo: Option<KeyboardConfig>,
+
+  // An optional provider that can be used by the injector
+  // to determine which keys are pressed at the time of injection.
+  // This is needed on Wayland to "wait" for key releases when
+  // the injected string contains a key that it's currently pressed.
+  // Otherwise, a key that is already pressed cannot be injected.
+  pub keyboard_state_provider: Option<Box<dyn KeyboardStateProvider>>,
 }
 
 // This struct identifies the keyboard layout that
@@ -111,6 +124,10 @@ pub struct KeyboardConfig {
   pub options: Option<String>,
 }
 
+pub trait KeyboardStateProvider {
+  fn is_key_pressed(&self, code: u32) -> bool;
+}
+
 impl Default for InjectorCreationOptions {
   fn default() -> Self {
     Self {
@@ -118,6 +135,7 @@ impl Default for InjectorCreationOptions {
       evdev_modifiers: None,
       evdev_max_modifier_combination_len: None,
       evdev_keyboard_rmlvo: None,
+      keyboard_state_provider: None,
     }
   }
 }

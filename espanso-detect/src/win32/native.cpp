@@ -39,8 +39,6 @@
 #include <strsafe.h>
 #include <Windows.h>
 
-// How many milliseconds must pass between events before refreshing the keyboard layout
-const long DETECT_REFRESH_KEYBOARD_LAYOUT_INTERVAL = 2000;
 const wchar_t *const DETECT_WINCLASS = L"EspansoDetect";
 const USHORT MOUSE_DOWN_FLAGS = RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_DOWN |
                         RI_MOUSE_BUTTON_1_DOWN | RI_MOUSE_BUTTON_2_DOWN | RI_MOUSE_BUTTON_3_DOWN |
@@ -52,6 +50,8 @@ const USHORT MOUSE_UP_FLAGS = RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_UP
 typedef struct {
   HKL current_keyboard_layout;
   DWORD last_key_press_tick;
+  // How many milliseconds must pass between events before refreshing the keyboard layout
+  long keyboard_layout_cache_interval;
 
   // Rust interop
   void * rust_instance;
@@ -116,10 +116,12 @@ LRESULT CALLBACK detect_window_procedure(HWND window, unsigned int msg, WPARAM w
     {
       // We only want KEY UP AND KEY DOWN events
       if (raw->data.keyboard.Message != WM_KEYDOWN && raw->data.keyboard.Message != WM_KEYUP &&
-          raw->data.keyboard.Message != WM_SYSKEYDOWN)
+          raw->data.keyboard.Message != WM_SYSKEYDOWN && raw->data.keyboard.Message != WM_SYSKEYUP)
       {
         return 0;
       }
+
+      event.has_known_source = (raw->header.hDevice == 0) ? 0 : 1;
 
       // The alt key sends a SYSKEYDOWN instead of KEYDOWN event
       int is_key_down = raw->data.keyboard.Message == WM_KEYDOWN ||
@@ -128,7 +130,7 @@ LRESULT CALLBACK detect_window_procedure(HWND window, unsigned int msg, WPARAM w
       DWORD currentTick = GetTickCount();
 
       // If enough time has passed between the last keypress and now, refresh the keyboard layout
-      if ((currentTick - variables->last_key_press_tick) > DETECT_REFRESH_KEYBOARD_LAYOUT_INTERVAL)
+      if ((currentTick - variables->last_key_press_tick) > variables->keyboard_layout_cache_interval)
       {
 
         // Because keyboard layouts on windows are Window-specific, to get the current
@@ -154,9 +156,10 @@ LRESULT CALLBACK detect_window_procedure(HWND window, unsigned int msg, WPARAM w
       std::vector<BYTE> lpKeyState(256);
       if (GetKeyboardState(lpKeyState.data()))
       {
-        // This flag is needed to avoid chaning the keyboard state for some layouts.
-        // Refer to issue: https://github.com/federico-terzi/espanso/issues/86
-        UINT flags = 1 << 2;
+        // This flag is needed to avoid changing the keyboard state for some layouts.
+        // The 1 << 2 (setting bit 2) part is needed due to this issue: https://github.com/federico-terzi/espanso/issues/86
+        // while the 1 (setting bit 0) part is needed due to this issue: https://github.com/federico-terzi/espanso/issues/552
+        UINT flags = 1 << 2 | 1;
 
         int result = ToUnicodeEx(raw->data.keyboard.VKey, raw->data.keyboard.MakeCode, lpKeyState.data(), reinterpret_cast<LPWSTR>(event.buffer), (sizeof(event.buffer)/sizeof(event.buffer[0])) - 1, flags, variables->current_keyboard_layout);
 
@@ -164,6 +167,15 @@ LRESULT CALLBACK detect_window_procedure(HWND window, unsigned int msg, WPARAM w
         if (result >= 1)
         {
           event.buffer_len = result;
+
+          // Filter out the value if the key was pressed while the ALT key was down
+          // but not if AltGr is down (which is a shortcut to ALT+CTRL on some keyboards, such 
+          // as the italian one).
+          // This is needed in conjunction with the fix for: https://github.com/federico-terzi/espanso/issues/725
+          if ((lpKeyState[VK_MENU] & 0x80) != 0 && (lpKeyState[VK_CONTROL] & 0x80) == 0) {
+            memset(event.buffer, 0, sizeof(event.buffer));
+            event.buffer_len = 0;
+          }
         }
         else
         {
@@ -257,7 +269,7 @@ LRESULT CALLBACK detect_window_procedure(HWND window, unsigned int msg, WPARAM w
   }
 }
 
-void * detect_initialize(void *_self, int32_t *error_code)
+void * detect_initialize(void *_self, InitOptions * options, int32_t *error_code)
 {
   HWND window = NULL;
 
@@ -285,6 +297,7 @@ void * detect_initialize(void *_self, int32_t *error_code)
 
     // Initialize the default keyboard layout
     variables->current_keyboard_layout = GetKeyboardLayout(0);
+    variables->keyboard_layout_cache_interval = options->keyboard_layout_cache_interval;
 
     // Docs: https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createwindowexw
     window = CreateWindowEx(

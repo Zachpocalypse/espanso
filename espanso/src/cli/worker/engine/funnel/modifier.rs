@@ -24,7 +24,7 @@ use std::{
 
 use log::warn;
 
-use crate::engine::process::ModifierStatusProvider;
+use espanso_engine::process::ModifierStatusProvider;
 
 /// This duration represents the maximum length for which a pressed modifier
 /// event is considered valid. This is useful when the "release" event is
@@ -32,10 +32,12 @@ use crate::engine::process::ModifierStatusProvider;
 /// after a while.
 const MAXIMUM_MODIFIERS_PRESS_TIME_RECORD: Duration = Duration::from_secs(30);
 
-// TODO: should we add also Shift on Linux to avoid any conflict in the expansion process? Investigate
-/// These are the modifiers that might conflict with the expansion process. For example,
-/// if espanso injects some texts while Alt or Ctrl are pressed, strange things might happen.
-const CONFLICTING_MODIFIERS: &[Modifier] = &[Modifier::Ctrl, Modifier::Alt, Modifier::Meta];
+const CONFLICTING_MODIFIERS: &[Modifier] = &[
+  Modifier::Ctrl,
+  Modifier::Alt,
+  Modifier::Meta,
+  Modifier::Shift,
+];
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub enum Modifier {
@@ -89,6 +91,13 @@ impl ModifierStateStore {
       }
     }
   }
+
+  pub fn clear_state(&self) {
+    let mut state = self.state.lock().expect("unable to obtain modifier state");
+    for (_, status) in &mut state.modifiers {
+      status.release();
+    }
+  }
 }
 
 struct ModifiersState {
@@ -138,5 +147,46 @@ impl ModifierStatus {
 impl ModifierStatusProvider for ModifierStateStore {
   fn is_any_conflicting_modifier_pressed(&self) -> bool {
     self.is_any_conflicting_modifier_pressed()
+  }
+}
+
+impl espanso_engine::process::ModifierStateProvider for ModifierStateStore {
+  fn get_modifier_state(&self) -> espanso_engine::process::ModifierState {
+    let mut state = self.state.lock().expect("unable to obtain modifier state");
+
+    let mut is_ctrl_down = false;
+    let mut is_alt_down = false;
+    let mut is_meta_down = false;
+
+    for (modifier, status) in &mut state.modifiers {
+      if status.is_outdated() {
+        warn!(
+          "detected outdated modifier records for {:?}, releasing the state",
+          modifier
+        );
+        status.release();
+      }
+
+      if status.is_pressed() {
+        match modifier {
+          Modifier::Ctrl => {
+            is_ctrl_down = true;
+          }
+          Modifier::Alt => {
+            is_alt_down = true;
+          }
+          Modifier::Meta => {
+            is_meta_down = true;
+          }
+          _ => {}
+        }
+      }
+    }
+
+    espanso_engine::process::ModifierState {
+      is_ctrl_down,
+      is_alt_down,
+      is_meta_down,
+    }
   }
 }

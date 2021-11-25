@@ -48,6 +48,9 @@ pub struct SearchConfig {
 
   #[serde(default = "default_algorithm")]
   pub algorithm: String,
+
+  #[serde(default)]
+  pub hint: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -55,4 +58,7 @@ pub struct SearchItem {
   pub id: String,
   pub label: String,
   pub trigger: Option<String>,
+
+  #[serde(default)]
+  pub is_builtin: bool,
 }

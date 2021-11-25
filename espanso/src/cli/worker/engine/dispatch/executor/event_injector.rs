@@ -21,7 +21,7 @@ use std::convert::TryInto;
 
 use espanso_inject::{InjectionOptions, Injector};
 
-use crate::engine::dispatch::TextInjector;
+use espanso_engine::dispatch::TextInjector;
 
 use super::InjectParamsProvider;
 
@@ -53,10 +53,20 @@ impl<'a> TextInjector for EventInjectorAdapter<'a> {
     let injection_options = InjectionOptions {
       delay: params
         .inject_delay
-        .unwrap_or(InjectionOptions::default().delay.try_into().unwrap())
+        .unwrap_or_else(|| InjectionOptions::default().delay.try_into().unwrap())
         .try_into()
         .unwrap(),
       disable_fast_inject: params.disable_x11_fast_inject,
+      evdev_modifier_delay: params
+        .evdev_modifier_delay
+        .unwrap_or_else(|| {
+          InjectionOptions::default()
+            .evdev_modifier_delay
+            .try_into()
+            .unwrap()
+        })
+        .try_into()
+        .unwrap(),
     };
 
     // We don't use the lines() method because it skips emtpy lines, which is not what we want.

@@ -17,12 +17,10 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::time::Duration;
-
 use anyhow::Result;
 use crossbeam::channel::Sender;
-use log::{error, info};
 
+#[allow(dead_code)]
 pub enum SecureInputEvent {
   Disabled,
   Enabled { app_name: String, app_path: String },
@@ -40,14 +38,24 @@ pub fn initialize_and_spawn(secure_input_sender: Sender<SecureInputEvent>) -> Re
     .name("secure-input-monitor".to_string())
     .spawn(move || {
       // TODO: pass interval from config parameter
-      secure_input_main(secure_input_sender, std::time::Duration::from_secs(5));
+      secure_input_main(
+        secure_input_sender,
+        std::time::Duration::from_secs(3),
+        std::time::Duration::from_secs(1),
+      );
     })?;
 
   Ok(())
 }
 
 #[cfg(target_os = "macos")]
-fn secure_input_main(secure_input_sender: Sender<SecureInputEvent>, watch_interval: Duration) {
+fn secure_input_main(
+  secure_input_sender: Sender<SecureInputEvent>,
+  min_watch_interval: std::time::Duration,
+  max_watch_interval: std::time::Duration,
+) {
+  use log::{error, info};
+
   info!("monitoring the status of secure input");
 
   let mut last_secure_input_pid: Option<i64> = None;
@@ -58,6 +66,7 @@ fn secure_input_main(secure_input_sender: Sender<SecureInputEvent>, watch_interv
       // Some application is currently on SecureInput
       let should_notify = if let Some(old_pid) = last_secure_input_pid {
         // We already detected a SecureInput app
+        #[allow(clippy::needless_bool)]
         if old_pid != pid {
           // The old app is different from the current one, we should take action
           true
@@ -74,7 +83,7 @@ fn secure_input_main(secure_input_sender: Sender<SecureInputEvent>, watch_interv
         let secure_input_app = espanso_mac_utils::get_secure_input_application();
 
         if let Some((app_name, app_path)) = secure_input_app {
-          info!("secure input has been acquired by {}, preventing espanso from working correctly. Full path: {}", app_name, app_path);
+          info!("secure input has been acquired, preventing espanso from working correctly. Our guess is that this is caused by '{}', but there are cases in which the detection is unreliable. Full path: {}", app_name, app_path);
 
           if let Err(error) =
             secure_input_sender.send(SecureInputEvent::Enabled { app_name, app_path })
@@ -91,7 +100,7 @@ fn secure_input_main(secure_input_sender: Sender<SecureInputEvent>, watch_interv
       // No app is currently keeping SecureInput
 
       // If there was an app with SecureInput, notify that is now free
-      if let Some(old_pid) = last_secure_input_pid {
+      if last_secure_input_pid.is_some() {
         info!("secure input has been disabled");
 
         if let Err(error) = secure_input_sender.send(SecureInputEvent::Disabled) {
@@ -102,6 +111,11 @@ fn secure_input_main(secure_input_sender: Sender<SecureInputEvent>, watch_interv
       last_secure_input_pid = None
     }
 
-    std::thread::sleep(watch_interval);
+    // If an application is currently keeping secure input, refresh the status more often
+    if pid.is_some() {
+      std::thread::sleep(max_watch_interval);
+    } else {
+      std::thread::sleep(min_watch_interval);
+    }
   }
 }

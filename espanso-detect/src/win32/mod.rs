@@ -17,6 +17,7 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use std::os::raw::c_long;
 use std::{convert::TryInto, ffi::c_void};
 
 use lazycell::LazyCell;
@@ -64,6 +65,12 @@ pub struct RawInputEvent {
   pub key_code: i32,
   pub variant: i32,
   pub status: i32,
+
+  // Only relevant for keyboard events, this is set to 1
+  // if a keyboard event has an explicit source, 0 otherwise.
+  // This is needed to filter out software generated events,
+  // including those from espanso.
+  pub has_known_source: i32,
 }
 
 #[repr(C)]
@@ -73,10 +80,19 @@ pub struct RawHotKey {
   pub flags: u32,
 }
 
+#[repr(C)]
+pub struct InitOptions {
+  pub keyboard_layout_cache_interval: c_long,
+}
+
 #[allow(improper_ctypes)]
 #[link(name = "espansodetect", kind = "static")]
 extern "C" {
-  pub fn detect_initialize(_self: *const Win32Source, error_code: *mut i32) -> *mut c_void;
+  pub fn detect_initialize(
+    _self: *const Win32Source,
+    options: *const InitOptions,
+    error_code: *mut i32,
+  ) -> *mut c_void;
   pub fn detect_register_hotkey(window: *const c_void, hotkey: RawHotKey) -> i32;
 
   pub fn detect_eventloop(
@@ -91,23 +107,37 @@ pub struct Win32Source {
   handle: *mut c_void,
   callback: LazyCell<SourceCallback>,
   hotkeys: Vec<HotKey>,
+
+  exclude_orphan_events: bool,
+  keyboard_layout_cache_interval: i64,
 }
 
 #[allow(clippy::new_without_default)]
 impl Win32Source {
-  pub fn new(hotkeys: &[HotKey]) -> Win32Source {
+  pub fn new(
+    hotkeys: &[HotKey],
+    exclude_orphan_events: bool,
+    keyboard_layout_cache_interval: i64,
+  ) -> Win32Source {
     Self {
       handle: std::ptr::null_mut(),
       callback: LazyCell::new(),
       hotkeys: hotkeys.to_vec(),
+      exclude_orphan_events,
+      keyboard_layout_cache_interval,
     }
   }
 }
 
 impl Source for Win32Source {
   fn initialize(&mut self) -> Result<()> {
+    let options = InitOptions {
+      keyboard_layout_cache_interval: self.keyboard_layout_cache_interval.try_into().unwrap(),
+    };
+
     let mut error_code = 0;
-    let handle = unsafe { detect_initialize(self as *const Win32Source, &mut error_code) };
+    let handle =
+      unsafe { detect_initialize(self as *const Win32Source, &options, &mut error_code) };
 
     if handle.is_null() {
       let error = match error_code {
@@ -120,7 +150,7 @@ impl Source for Win32Source {
 
     // Register the hotkeys
     self.hotkeys.iter().for_each(|hk| {
-      let raw = convert_hotkey_to_raw(&hk);
+      let raw = convert_hotkey_to_raw(hk);
       if let Some(raw_hk) = raw {
         if unsafe { detect_register_hotkey(handle, raw_hk) } == 0 {
           error!("unable to register hotkey: {}", hk);
@@ -148,6 +178,17 @@ impl Source for Win32Source {
     }
 
     extern "C" fn callback(_self: *mut Win32Source, event: RawInputEvent) {
+      // Filter out keyboard events without an explicit HID device source.
+      // This is needed to filter out the software-generated events, including
+      // those from espanso.
+      if event.event_type == INPUT_EVENT_TYPE_KEYBOARD
+        && event.has_known_source == 0
+        && unsafe { (*_self).exclude_orphan_events }
+      {
+        trace!("skipping keyboard event with unknown HID source (probably software generated).");
+        return;
+      }
+
       let event: Option<InputEvent> = event.into();
       if let Some(callback) = unsafe { (*_self).callback.borrow() } {
         if let Some(event) = event {
@@ -186,31 +227,25 @@ impl Drop for Win32Source {
 
 fn convert_hotkey_to_raw(hk: &HotKey) -> Option<RawHotKey> {
   let key_code = hk.key.to_code()?;
-  let code: Result<u32, _> = key_code.try_into();
-  if let Ok(code) = code {
-    let mut flags = 0x4000; // NOREPEAT flags
-    if hk.has_ctrl() {
-      flags |= 0x0002;
-    }
-    if hk.has_alt() {
-      flags |= 0x0001;
-    }
-    if hk.has_meta() {
-      flags |= 0x0008;
-    }
-    if hk.has_shift() {
-      flags |= 0x0004;
-    }
-
-    Some(RawHotKey {
-      id: hk.id,
-      code,
-      flags,
-    })
-  } else {
-    error!("unable to generate raw hotkey, the key_code is overflowing");
-    None
+  let mut flags = 0x4000; // NOREPEAT flags
+  if hk.has_ctrl() {
+    flags |= 0x0002;
   }
+  if hk.has_alt() {
+    flags |= 0x0001;
+  }
+  if hk.has_meta() {
+    flags |= 0x0008;
+  }
+  if hk.has_shift() {
+    flags |= 0x0004;
+  }
+
+  Some(RawHotKey {
+    id: hk.id,
+    code: key_code,
+    flags,
+  })
 }
 
 #[derive(Error, Debug)]
@@ -391,6 +426,7 @@ mod tests {
       key_code: 0,
       variant: INPUT_LEFT_VARIANT,
       status: INPUT_STATUS_PRESSED,
+      has_known_source: 1,
     }
   }
 
@@ -459,6 +495,7 @@ mod tests {
       key_code: 123,
       variant: INPUT_LEFT_VARIANT,
       status: INPUT_STATUS_PRESSED,
+      has_known_source: 1,
     }
     .into();
     assert!(result.is_none());

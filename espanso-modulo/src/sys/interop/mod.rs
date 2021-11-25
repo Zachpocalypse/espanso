@@ -105,12 +105,17 @@ pub struct SearchResults {
 pub struct SearchMetadata {
   pub windowTitle: *const ::std::os::raw::c_char,
   pub iconPath: *const ::std::os::raw::c_char,
+  pub hintText: *const ::std::os::raw::c_char,
 }
 
 pub const WIZARD_MIGRATE_RESULT_SUCCESS: i32 = 0;
 pub const WIZARD_MIGRATE_RESULT_CLEAN_FAILURE: i32 = 1;
 pub const WIZARD_MIGRATE_RESULT_DIRTY_FAILURE: i32 = 2;
 pub const WIZARD_MIGRATE_RESULT_UNKNOWN_FAILURE: i32 = 3;
+
+pub const WIZARD_DETECTED_OS_UNKNOWN: i32 = 0;
+pub const WIZARD_DETECTED_OS_X11: i32 = 1;
+pub const WIZARD_DETECTED_OS_WAYLAND: i32 = 2;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -120,7 +125,9 @@ pub struct WizardMetadata {
   pub is_welcome_page_enabled: c_int,
   pub is_move_bundle_page_enabled: c_int,
   pub is_legacy_version_page_enabled: c_int,
+  pub is_wrong_edition_page_enabled: c_int,
   pub is_migrate_page_enabled: c_int,
+  pub is_auto_start_page_enabled: c_int,
   pub is_add_path_page_enabled: c_int,
   pub is_accessibility_page_enabled: c_int,
 
@@ -128,12 +135,58 @@ pub struct WizardMetadata {
   pub welcome_image_path: *const c_char,
   pub accessibility_image_1_path: *const c_char,
   pub accessibility_image_2_path: *const c_char,
+  pub detected_os: c_int,
 
-  pub is_legacy_version_running: extern fn() -> c_int,
-  pub backup_and_migrate: extern fn() -> c_int,
-  pub add_to_path: extern fn() -> c_int,
-  pub enable_accessibility: extern fn() -> c_int,
-  pub is_accessibility_enabled: extern fn() -> c_int,
+  pub is_legacy_version_running: extern "C" fn() -> c_int,
+  pub backup_and_migrate: extern "C" fn() -> c_int,
+  pub auto_start: extern "C" fn(auto_start: c_int) -> c_int,
+  pub add_to_path: extern "C" fn() -> c_int,
+  pub enable_accessibility: extern "C" fn() -> c_int,
+  pub is_accessibility_enabled: extern "C" fn() -> c_int,
+  pub on_completed: extern "C" fn(),
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct WelcomeMetadata {
+  pub window_icon_path: *const c_char,
+  pub tray_image_path: *const c_char,
+
+  pub already_running: c_int,
+
+  pub dont_show_again_changed: extern "C" fn(c_int),
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct TroubleshootingMetadata {
+  pub window_icon_path: *const c_char,
+  pub is_fatal_error: c_int,
+
+  pub error_sets: *const ErrorSetMetadata,
+  pub error_sets_count: c_int,
+
+  pub dont_show_again_changed: extern "C" fn(c_int),
+  pub open_file: extern "C" fn(*const c_char),
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ErrorSetMetadata {
+  pub file_path: *const c_char,
+
+  pub errors: *const ErrorMetadata,
+  pub errors_count: c_int,
+}
+
+pub const ERROR_METADATA_LEVEL_ERROR: c_int = 1;
+pub const ERROR_METADATA_LEVEL_WARNING: c_int = 2;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ErrorMetadata {
+  pub level: c_int,
+  pub message: *const c_char,
 }
 
 // Native bindings
@@ -160,5 +213,11 @@ extern "C" {
   pub(crate) fn update_items(app: *const c_void, items: *const SearchItem, itemCount: c_int);
 
   // WIZARD
-  pub(crate) fn interop_show_wizard(metadata: *const WizardMetadata);
+  pub(crate) fn interop_show_wizard(metadata: *const WizardMetadata) -> c_int;
+
+  // WELCOME
+  pub(crate) fn interop_show_welcome(metadata: *const WelcomeMetadata);
+
+  // TROUBLESHOOTING
+  pub(crate) fn interop_show_troubleshooting(metadata: *const TroubleshootingMetadata);
 }

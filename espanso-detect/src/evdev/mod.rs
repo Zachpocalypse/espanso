@@ -26,18 +26,21 @@ mod ffi;
 mod hotkey;
 mod keymap;
 mod state;
+mod sync;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{Context as AnyhowContext, Result};
 use context::Context;
 use device::{get_devices, Device};
 use keymap::Keymap;
 use lazycell::LazyCell;
 use libc::{
   __errno_location, close, epoll_ctl, epoll_event, epoll_wait, EINTR, EPOLLIN, EPOLL_CTL_ADD,
+  EPOLL_CTL_DEL,
 };
-use log::{error, trace};
+use log::{debug, error, info, trace, warn};
 use thiserror::Error;
 
 use crate::event::{InputEvent, Key, KeyboardEvent, Variant};
@@ -57,6 +60,19 @@ const BTN_MIDDLE: u16 = 0x112;
 const BTN_SIDE: u16 = 0x113;
 const BTN_EXTRA: u16 = 0x114;
 
+// Offset between evdev keycodes (where KEY_ESCAPE is 1), and the evdev XKB
+// keycode set (where ESC is 9).
+const EVDEV_OFFSET: u32 = 8;
+
+// List of modifier keycodes, as defined in the "input-event-codes.h" header
+// TODO: create an option to override them if needed
+const KEY_CTRL: u32 = 29;
+const KEY_SHIFT: u32 = 42;
+const KEY_ALT: u32 = 56;
+const KEY_META: u32 = 125;
+const KEY_CAPSLOCK: u32 = 58;
+const KEY_NUMLOCK: u32 = 69;
+
 pub struct EVDEVSource {
   devices: Vec<Device>,
   hotkeys: Vec<HotKey>,
@@ -65,11 +81,20 @@ pub struct EVDEVSource {
   _context: LazyCell<Context>,
   _keymap: LazyCell<Keymap>,
   _hotkey_filter: RefCell<HotKeyFilter>,
+  _modifiers_map: HashMap<String, u32>,
 }
 
 #[allow(clippy::new_without_default)]
 impl EVDEVSource {
   pub fn new(options: SourceCreationOptions) -> EVDEVSource {
+    let mut modifiers_map = HashMap::new();
+    modifiers_map.insert("ctrl".to_string(), KEY_CTRL + EVDEV_OFFSET);
+    modifiers_map.insert("shift".to_string(), KEY_SHIFT + EVDEV_OFFSET);
+    modifiers_map.insert("alt".to_string(), KEY_ALT + EVDEV_OFFSET);
+    modifiers_map.insert("meta".to_string(), KEY_META + EVDEV_OFFSET);
+    modifiers_map.insert("caps_lock".to_string(), KEY_CAPSLOCK + EVDEV_OFFSET);
+    modifiers_map.insert("num_lock".to_string(), KEY_NUMLOCK + EVDEV_OFFSET);
+
     Self {
       devices: Vec::new(),
       hotkeys: options.hotkeys,
@@ -77,6 +102,7 @@ impl EVDEVSource {
       _keymap: LazyCell::new(),
       _keyboard_rmlvo: options.evdev_keyboard_rmlvo,
       _hotkey_filter: RefCell::new(HotKeyFilter::new()),
+      _modifiers_map: modifiers_map,
     }
   }
 }
@@ -103,8 +129,20 @@ impl Source for EVDEVSource {
       }
     }
 
-    // Initialize the hotkeys
     let state = State::new(&keymap)?;
+
+    info!("Querying modifier status...");
+    if let Some(modifiers_state) =
+      sync::get_modifiers_state().context("EVDEV modifier context state synchronization")?
+    {
+      debug!("Updating device modifier state: {:?}", modifiers_state);
+
+      for device in &mut self.devices {
+        device.update_modifier_state(&modifiers_state, &self._modifiers_map);
+      }
+    }
+
+    // Initialize the hotkeys
     self
       ._hotkey_filter
       .borrow_mut()
@@ -167,7 +205,9 @@ impl Source for EVDEVSource {
         }
       }
 
-      for ev in evs.iter() {
+      #[allow(clippy::needless_range_loop)]
+      for i in 0usize..(ret as usize) {
+        let ev = evs[i];
         let device = &self.devices[ev.u64 as usize];
         match device.read() {
           Ok(events) if !events.is_empty() => {
@@ -177,7 +217,7 @@ impl Source for EVDEVSource {
               if let Some(event) = event {
                 // On Wayland we need to detect the global shortcuts manually
                 if let InputEvent::Keyboard(key_event) = &event {
-                  if let Some(hotkey) = (*hotkey_filter).process_event(&key_event) {
+                  if let Some(hotkey) = (*hotkey_filter).process_event(key_event) {
                     event_callback(InputEvent::HotKey(HotKeyEvent { hotkey_id: hotkey }))
                   }
                 }
@@ -189,7 +229,30 @@ impl Source for EVDEVSource {
             });
           }
           Ok(_) => { /* SKIP EMPTY */ }
-          Err(err) => error!("Can't read from device {}: {}", device.get_path(), err),
+          Err(err) => {
+            if let Some(DeviceError::FailedReadNoSuchDevice) = err.downcast_ref::<DeviceError>() {
+              warn!("Can't read from device {}, this error usually means the device has been disconnected, removing from epoll.", device.get_path());
+
+              if unsafe {
+                epoll_ctl(
+                  *epfd,
+                  EPOLL_CTL_DEL,
+                  device.get_raw_fd(),
+                  std::ptr::null_mut(),
+                )
+              } != 0
+              {
+                error!(
+                  "Could not remove {} from epoll, errno {}",
+                  device.get_path(),
+                  unsafe { *errno_ptr }
+                );
+                return Err(EVDEVSourceError::Internal().into());
+              }
+            } else {
+              error!("Can't read from device {}: {}", device.get_path(), err)
+            }
+          }
         }
       }
     }

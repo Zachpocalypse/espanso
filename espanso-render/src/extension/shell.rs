@@ -24,9 +24,10 @@ use std::{
 };
 
 use crate::{Extension, ExtensionOutput, ExtensionResult, Params, Value};
-use log::{info, warn};
+use log::{error, info};
 use thiserror::Error;
 
+#[allow(clippy::upper_case_acronyms)]
 pub enum Shell {
   Cmd,
   Powershell,
@@ -43,34 +44,34 @@ impl Shell {
     let mut command = match self {
       Shell::Cmd => {
         let mut command = Command::new("cmd");
-        command.args(&["/C", &cmd]);
+        command.args(&["/C", cmd]);
         command
       }
       Shell::Powershell => {
         let mut command = Command::new("powershell");
-        command.args(&["-Command", &cmd]);
+        command.args(&["-Command", cmd]);
         command
       }
       Shell::WSL => {
         is_wsl = true;
         let mut command = Command::new("bash");
-        command.args(&["-c", &cmd]);
+        command.args(&["-c", cmd]);
         command
       }
       Shell::WSL2 => {
         is_wsl = true;
         let mut command = Command::new("wsl");
-        command.args(&["bash", "-c", &cmd]);
+        command.args(&["bash", "-c", cmd]);
         command
       }
       Shell::Bash => {
         let mut command = Command::new("bash");
-        command.args(&["-c", &cmd]);
+        command.args(&["-c", cmd]);
         command
       }
       Shell::Sh => {
         let mut command = Command::new("sh");
-        command.args(&["-c", &cmd]);
+        command.args(&["-c", cmd]);
         command
       }
     };
@@ -87,8 +88,7 @@ impl Shell {
     // should be passed to linux.
     // For more information: https://devblogs.microsoft.com/commandline/share-environment-vars-between-wsl-and-windows/
     if is_wsl {
-      let mut tokens: Vec<&str> = Vec::new();
-      tokens.push("CONFIG/p");
+      let mut tokens: Vec<&str> = vec!["CONFIG/p"];
 
       // Add all the previous variables
       for (key, _) in vars.iter() {
@@ -166,7 +166,7 @@ impl Extension for ShellExtension {
         Shell::default()
       };
 
-      let mut env_variables = super::util::convert_to_env_variables(&scope);
+      let mut env_variables = super::util::convert_to_env_variables(scope);
       env_variables.insert(
         "CONFIG".to_string(),
         self.config_path.to_string_lossy().to_string(),
@@ -191,23 +191,15 @@ impl Extension for ShellExtension {
             info!("this debug information was shown because the 'debug' option is true.");
           }
 
-          let ignore_error = params
-            .get("ignore_error")
-            .and_then(|v| v.as_bool())
-            .copied()
-            .unwrap_or(false);
-
-          if !output.status.success() || !error_str.trim().is_empty() {
-            warn!(
+          if !output.status.success() {
+            error!(
               "shell command exited with code: {} and error: {}",
               output.status, error_str
             );
 
-            if !ignore_error {
-              return ExtensionResult::Error(
-                ShellExtensionError::ExecutionError(error_str.to_string()).into(),
-              );
-            }
+            return ExtensionResult::Error(
+              ShellExtensionError::ExecutionError(error_str.to_string()).into(),
+            );
           }
 
           let trim = params
@@ -253,22 +245,20 @@ pub enum ShellExtensionError {
 mod tests {
   use super::*;
   use crate::Scope;
-  use std::iter::FromIterator;
 
   #[test]
   fn shell_not_trimmed() {
     let extension = ShellExtension::new(&PathBuf::new());
 
-    let param = Params::from_iter(
-      vec![
-        (
-          "cmd".to_string(),
-          Value::String("echo \"hello world\"".to_string()),
-        ),
-        ("trim".to_string(), Value::Bool(false)),
-      ]
-      .into_iter(),
-    );
+    let param = vec![
+      (
+        "cmd".to_string(),
+        Value::String("echo \"hello world\"".to_string()),
+      ),
+      ("trim".to_string(), Value::Bool(false)),
+    ]
+    .into_iter()
+    .collect::<Params>();
     if cfg!(target_os = "windows") {
       assert_eq!(
         extension
@@ -292,13 +282,13 @@ mod tests {
   fn shell_trimmed() {
     let extension = ShellExtension::new(&PathBuf::new());
 
-    let param = Params::from_iter(
-      vec![(
-        "cmd".to_string(),
-        Value::String("echo \"hello world\"".to_string()),
-      )]
-      .into_iter(),
-    );
+    let param = vec![(
+      "cmd".to_string(),
+      Value::String("echo \"hello world\"".to_string()),
+    )]
+    .into_iter()
+    .collect::<Params>();
+
     assert_eq!(
       extension
         .calculate(&Default::default(), &Default::default(), &param)
@@ -313,13 +303,12 @@ mod tests {
   fn pipes() {
     let extension = ShellExtension::new(&PathBuf::new());
 
-    let param = Params::from_iter(
-      vec![(
-        "cmd".to_string(),
-        Value::String("echo \"hello world\" | cat".to_string()),
-      )]
-      .into_iter(),
-    );
+    let param = vec![(
+      "cmd".to_string(),
+      Value::String("echo \"hello world\" | cat".to_string()),
+    )]
+    .into_iter()
+    .collect::<Params>();
     assert_eq!(
       extension
         .calculate(&Default::default(), &Default::default(), &param)
@@ -334,24 +323,22 @@ mod tests {
     let extension = ShellExtension::new(&PathBuf::new());
 
     let param = if cfg!(not(target_os = "windows")) {
-      Params::from_iter(
-        vec![(
-          "cmd".to_string(),
-          Value::String("echo $ESPANSO_VAR1".to_string()),
-        )]
-        .into_iter(),
-      )
+      vec![(
+        "cmd".to_string(),
+        Value::String("echo $ESPANSO_VAR1".to_string()),
+      )]
+      .into_iter()
+      .collect::<Params>()
     } else {
-      Params::from_iter(
-        vec![
-          (
-            "cmd".to_string(),
-            Value::String("echo %ESPANSO_VAR1%".to_string()),
-          ),
-          ("shell".to_string(), Value::String("cmd".to_string())),
-        ]
-        .into_iter(),
-      )
+      vec![
+        (
+          "cmd".to_string(),
+          Value::String("echo %ESPANSO_VAR1%".to_string()),
+        ),
+        ("shell".to_string(), Value::String("cmd".to_string())),
+      ]
+      .into_iter()
+      .collect::<Params>()
     };
     let mut scope = Scope::new();
     scope.insert("var1", ExtensionOutput::Single("hello world".to_string()));
@@ -368,13 +355,12 @@ mod tests {
   fn invalid_command() {
     let extension = ShellExtension::new(&PathBuf::new());
 
-    let param = Params::from_iter(
-      vec![(
-        "cmd".to_string(),
-        Value::String("nonexistentcommand".to_string()),
-      )]
-      .into_iter(),
-    );
+    let param = vec![(
+      "cmd".to_string(),
+      Value::String("nonexistentcommand".to_string()),
+    )]
+    .into_iter()
+    .collect::<Params>();
     assert!(matches!(
       extension.calculate(&Default::default(), &Default::default(), &param),
       ExtensionResult::Error(_)
@@ -386,32 +372,12 @@ mod tests {
   fn exit_error() {
     let extension = ShellExtension::new(&PathBuf::new());
 
-    let param =
-      Params::from_iter(vec![("cmd".to_string(), Value::String("exit 1".to_string()))].into_iter());
+    let param = vec![("cmd".to_string(), Value::String("exit 1".to_string()))]
+      .into_iter()
+      .collect::<Params>();
     assert!(matches!(
       extension.calculate(&Default::default(), &Default::default(), &param),
       ExtensionResult::Error(_)
     ));
-  }
-
-  #[test]
-  #[cfg(not(target_os = "windows"))]
-  fn ignore_error() {
-    let extension = ShellExtension::new(&PathBuf::new());
-
-    let param = Params::from_iter(
-      vec![
-        ("cmd".to_string(), Value::String("exit 1".to_string())),
-        ("ignore_error".to_string(), Value::Bool(true)),
-      ]
-      .into_iter(),
-    );
-    assert_eq!(
-      extension
-        .calculate(&Default::default(), &Default::default(), &param)
-        .into_success()
-        .unwrap(),
-      ExtensionOutput::Single("".to_string())
-    );
   }
 }

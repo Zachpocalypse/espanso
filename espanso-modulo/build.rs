@@ -17,10 +17,10 @@
  * along with espanso.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
 #[cfg(not(target_os = "windows"))]
-use std::path::{Path};
+use std::path::Path;
 
 #[cfg(not(target_os = "linux"))]
 const WX_WIDGETS_ARCHIVE_NAME: &str = "wxWidgets-3.1.5.zip";
@@ -89,17 +89,21 @@ fn build_native() {
       ])
       .spawn()
       .expect("failed to execute nmake");
-    if !handle.wait().expect("unable to wait for nmake command").success() {
+    if !handle
+      .wait()
+      .expect("unable to wait for nmake command")
+      .success()
+    {
       panic!("nmake returned non-zero exit code!");
     }
   }
 
   // Make sure wxWidgets is compiled
   if !out_wx_dir
-      .join("build")
-      .join("msw")
-      .join("vc_mswu_x64")
-      .is_dir()
+    .join("build")
+    .join("msw")
+    .join("vc_mswu_x64")
+    .is_dir()
   {
     panic!("wxWidgets is not compiled correctly, missing 'build/msw/vc_mswu_x64' directory")
   }
@@ -115,6 +119,10 @@ fn build_native() {
     .file("src/sys/common/common.cpp")
     .file("src/sys/wizard/wizard.cpp")
     .file("src/sys/wizard/wizard_gui.cpp")
+    .file("src/sys/welcome/welcome.cpp")
+    .file("src/sys/welcome/welcome_gui.cpp")
+    .file("src/sys/troubleshooting/troubleshooting.cpp")
+    .file("src/sys/troubleshooting/troubleshooting_gui.cpp")
     .flag("/EHsc")
     .include(wx_include_dir)
     .include(wx_include_msvc_dir)
@@ -147,6 +155,18 @@ fn build_native() {
   let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("missing OUT_DIR"));
   let out_wx_dir = out_dir.join("wx");
 
+  let target_arch = match std::env::var("CARGO_CFG_TARGET_ARCH")
+    .expect("unable to read target arch")
+    .as_str()
+  {
+    "x86_64" => "x86_64",
+    "aarch64" => "arm64",
+    arch => panic!("unsupported arch {}", arch),
+  };
+
+  let should_use_ci_m1_workaround =
+    std::env::var("CI").unwrap_or_default() == "true" && target_arch == "arm64";
+
   if !out_wx_dir.is_dir() {
     // Extract the wxWidgets archive
     let wx_archive =
@@ -160,37 +180,55 @@ fn build_native() {
     let build_dir = out_wx_dir.join("build-cocoa");
     std::fs::create_dir_all(&build_dir).expect("unable to create build-cocoa directory");
 
-    let target_arch = match std::env::var("CARGO_CFG_TARGET_ARCH").expect("unable to read target arch").as_str() {
-      "x86_64" => "x86_64",
-      "aarch64" => "arm64",
-      arch => panic!("unsupported arch {}", arch),
+    let mut handle = if should_use_ci_m1_workaround {
+      // Because of a configuration problem on the GitHub CI pipeline,
+      // we need to use a series of workarounds to build for M1 machines.
+      // See: https://github.com/actions/virtual-environments/issues/3288#issuecomment-830207746
+      Command::new(out_wx_dir.join("configure"))
+        .current_dir(build_dir.to_string_lossy().to_string())
+        .args(&[
+          "--disable-shared",
+          "--without-libtiff",
+          "--without-liblzma",
+          "--with-libjpeg=builtin",
+          "--with-libpng=builtin",
+          "--enable-universal-binary=arm64,x86_64",
+        ])
+        .spawn()
+        .expect("failed to execute configure")
+    } else {
+      Command::new(out_wx_dir.join("configure"))
+        .current_dir(build_dir.to_string_lossy().to_string())
+        .args(&[
+          "--disable-shared",
+          "--without-libtiff",
+          "--without-liblzma",
+          "--with-libjpeg=builtin",
+          "--with-libpng=builtin",
+          &format!("--enable-macosx_arch={}", target_arch),
+        ])
+        .spawn()
+        .expect("failed to execute configure")
     };
 
-    let mut handle = Command::new(out_wx_dir.join("configure"))
-      .current_dir(
-        build_dir.to_string_lossy().to_string()
-      )
-      .args(&[
-        "--disable-shared",
-        "--without-libtiff",
-        &format!("--enable-macosx_arch={}", target_arch),
-      ])
-      .spawn()
-      .expect("failed to execute configure");
-    if !handle.wait().expect("unable to wait for configure command").success() {
+    if !handle
+      .wait()
+      .expect("unable to wait for configure command")
+      .success()
+    {
       panic!("configure returned non-zero exit code!");
     }
 
     let mut handle = Command::new("make")
-      .current_dir(
-        build_dir.to_string_lossy().to_string()
-      )
-      .args(&[
-        "-j8",
-      ])
+      .current_dir(build_dir.to_string_lossy().to_string())
+      .args(&["-j8"])
       .spawn()
       .expect("failed to execute make");
-    if !handle.wait().expect("unable to wait for make command").success() {
+    if !handle
+      .wait()
+      .expect("unable to wait for make command")
+      .success()
+    {
       panic!("make returned non-zero exit code!");
     }
   }
@@ -198,6 +236,13 @@ fn build_native() {
   // Make sure wxWidgets is compiled
   if !out_wx_dir.join("build-cocoa").is_dir() {
     panic!("wxWidgets is not compiled correctly, missing 'build-cocoa/' directory")
+  }
+
+  // If using the M1 CI workaround, convert all the universal libraries to arm64 ones
+  // This is needed until https://github.com/rust-lang/rust/issues/55235 is fixed
+  if should_use_ci_m1_workaround {
+    convert_fat_libraries_to_arm(&out_wx_dir.join("build-cocoa").join("lib"));
+    convert_fat_libraries_to_arm(&out_wx_dir.join("build-cocoa"));
   }
 
   let config_path = out_wx_dir.join("build-cocoa").join("wx-config");
@@ -211,6 +256,10 @@ fn build_native() {
     .file("src/sys/search/search.cpp")
     .file("src/sys/wizard/wizard.cpp")
     .file("src/sys/wizard/wizard_gui.cpp")
+    .file("src/sys/welcome/welcome.cpp")
+    .file("src/sys/welcome/welcome_gui.cpp")
+    .file("src/sys/troubleshooting/troubleshooting.cpp")
+    .file("src/sys/troubleshooting/troubleshooting_gui.cpp")
     .file("src/sys/common/mac.mm");
   build.flag("-std=c++17");
 
@@ -231,6 +280,47 @@ fn build_native() {
   if let Some(path) = macos_link_search_path() {
     println!("cargo:rustc-link-lib=clang_rt.osx");
     println!("cargo:rustc-link-search={}", path);
+  }
+}
+
+#[cfg(target_os = "macos")]
+fn convert_fat_libraries_to_arm(lib_dir: &Path) {
+  for entry in
+    glob::glob(&format!("{}/*", lib_dir.to_string_lossy())).expect("failed to glob directory")
+  {
+    let path = entry.expect("unable to unwrap glob entry");
+
+    // Make sure it's a fat library
+    let lipo_output = std::process::Command::new("lipo")
+      .args(&["-detailed_info", &path.to_string_lossy().to_string()])
+      .output()
+      .expect("unable to check if library is fat");
+    let lipo_output = String::from_utf8_lossy(&lipo_output.stdout);
+    let lipo_output = lipo_output.trim();
+    if !lipo_output.contains("Fat header") {
+      println!(
+        "skipping {} as it's not a fat library",
+        path.to_string_lossy()
+      );
+      continue;
+    }
+
+    println!("converting {} to arm", path.to_string_lossy(),);
+
+    let result = std::process::Command::new("lipo")
+      .args(&[
+        "-thin",
+        "arm64",
+        &path.to_string_lossy().to_string(),
+        "-output",
+        &path.to_string_lossy().to_string(),
+      ])
+      .output()
+      .expect("unable to extract arm64 slice from library");
+
+    if !result.status.success() {
+      panic!("unable to convert fat library to arm64 version");
+    }
   }
 }
 
@@ -313,7 +403,7 @@ fn macos_link_search_path() -> Option<String> {
   let stdout = String::from_utf8_lossy(&output.stdout);
   for line in stdout.lines() {
     if line.contains("libraries: =") {
-      let path = line.split('=').skip(1).next()?;
+      let path = line.split('=').nth(1)?;
       return Some(format!("{}/lib/darwin", path));
     }
   }
@@ -323,8 +413,6 @@ fn macos_link_search_path() -> Option<String> {
 }
 
 // TODO: add documentation for linux
-// Install LLVM:
-// sudo apt install clang
 // Install wxWidgets:
 // sudo apt install libwxgtk3.0-0v5 libwxgtk3.0-dev
 //
@@ -332,14 +420,26 @@ fn macos_link_search_path() -> Option<String> {
 #[cfg(target_os = "linux")]
 fn build_native() {
   // Make sure wxWidgets is installed
-  if std::process::Command::new("wx-config")
+  // Depending on the installation package, the 'wx-config' command might also be available as 'wx-config-gtk3',
+  // so we need to check for both.
+  // See also: https://github.com/federico-terzi/espanso/issues/840
+  let wx_config_command = if std::process::Command::new("wx-config")
     .arg("--version")
-    .output().is_err()
+    .output()
+    .is_ok()
   {
-    panic!("wxWidgets is not installed, as `wx-config` cannot be exectued")
-  }
+    "wx-config"
+  } else if std::process::Command::new("wx-config-gtk3")
+    .arg("--version")
+    .output()
+    .is_ok()
+  {
+    "wx-config-gtk3"
+  } else {
+    panic!("wxWidgets is not installed, as `wx-config` cannot be executed")
+  };
 
-  let config_path = PathBuf::from("wx-config");
+  let config_path = PathBuf::from(wx_config_command);
   let cpp_flags = get_cpp_flags(&config_path);
 
   let mut build = cc::Build::new();
@@ -347,7 +447,13 @@ fn build_native() {
     .cpp(true)
     .file("src/sys/form/form.cpp")
     .file("src/sys/search/search.cpp")
-    .file("src/sys/common/common.cpp");
+    .file("src/sys/common/common.cpp")
+    .file("src/sys/wizard/wizard.cpp")
+    .file("src/sys/wizard/wizard_gui.cpp")
+    .file("src/sys/welcome/welcome.cpp")
+    .file("src/sys/welcome/welcome_gui.cpp")
+    .file("src/sys/troubleshooting/troubleshooting.cpp")
+    .file("src/sys/troubleshooting/troubleshooting_gui.cpp");
   build.flag("-std=c++17");
 
   for flag in cpp_flags {

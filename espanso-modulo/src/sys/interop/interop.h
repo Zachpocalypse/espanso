@@ -87,6 +87,7 @@ typedef struct SearchResults {
 typedef struct SearchMetadata {
   const char *windowTitle;
   const char *iconPath;
+  const char *hintText;
 } SearchMetadata;
 
 // WIZARD
@@ -96,13 +97,19 @@ const int MIGRATE_RESULT_CLEAN_FAILURE = 1;
 const int MIGRATE_RESULT_DIRTY_FAILURE = 2;
 const int MIGRATE_RESULT_UNKNOWN_FAILURE = 3;
 
+const int DETECTED_OS_UNKNOWN = 0;
+const int DETECTED_OS_X11 = 1;
+const int DETECTED_OS_WAYLAND = 2;
+
 typedef struct WizardMetadata {
   const char *version;
 
   const int is_welcome_page_enabled; 
   const int is_move_bundle_page_enabled; 
   const int is_legacy_version_page_enabled; 
+  const int is_wrong_edition_page_enabled; 
   const int is_migrate_page_enabled; 
+  const int is_auto_start_page_enabled; 
   const int is_add_path_page_enabled; 
   const int is_accessibility_page_enabled; 
 
@@ -110,11 +117,54 @@ typedef struct WizardMetadata {
   const char *welcome_image_path;
   const char *accessibility_image_1_path;
   const char *accessibility_image_2_path;
+  const int detected_os;
 
   // METHODS
   int (*is_legacy_version_running)();
   int (*backup_and_migrate)();
+  int (*auto_start)(int);
   int (*add_to_path)();
   int (*enable_accessibility)();
   int (*is_accessibility_enabled)();
+  void (*on_completed)();
 } WizardMetadata;
+
+// WELCOME
+
+typedef struct WelcomeMetadata {
+  const char *window_icon_path;
+  const char *tray_image_path;
+
+  const int already_running;
+
+  // METHODS
+  int (*dont_show_again_changed)(int);
+} WelcomeMetadata;
+
+// TROUBLESHOOTING
+
+const int ERROR_METADATA_LEVEL_ERROR = 1;
+const int ERROR_METADATA_LEVEL_WARNING = 2;
+typedef struct ErrorMetadata {
+  const int level;
+  const char *message;
+} ErrorMetadata;
+
+typedef struct ErrorSetMetadata {
+  const char *file_path;
+  const ErrorMetadata * errors;
+  const int errors_count;
+} ErrorSetMetadata;
+
+typedef struct TroubleshootingMetadata {
+  const char *window_icon_path;
+
+  const int is_fatal_error;
+
+  const ErrorSetMetadata * error_sets;
+  const int error_sets_count;
+
+  // METHODS
+  int (*dont_show_again_changed)(int);
+  int (*open_file)(const char * file_name);
+} TroubleshootingMetadata;

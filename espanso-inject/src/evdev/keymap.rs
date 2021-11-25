@@ -24,12 +24,11 @@ pub struct Keymap {
 
 impl Keymap {
   pub fn new(context: &Context, rmlvo: Option<KeyboardConfig>) -> Result<Keymap> {
-    let names = rmlvo.map(|rmlvo| Self::generate_names(rmlvo));
-
-    let names_ptr = names.map_or(std::ptr::null(), |names| &names);
+    let owned_rmlvo = Self::generate_owned_rmlvo(rmlvo);
+    let names = Self::generate_names(&owned_rmlvo);
 
     let raw_keymap = unsafe {
-      xkb_keymap_new_from_names(context.get_handle(), names_ptr, XKB_KEYMAP_COMPILE_NO_FLAGS)
+      xkb_keymap_new_from_names(context.get_handle(), &names, XKB_KEYMAP_COMPILE_NO_FLAGS)
     };
     let keymap = scopeguard::guard(raw_keymap, |raw_keymap| unsafe {
       xkb_keymap_unref(raw_keymap);
@@ -48,29 +47,44 @@ impl Keymap {
     self.keymap
   }
 
-  fn generate_names(rmlvo: KeyboardConfig) -> xkb_rule_names {
+  fn generate_owned_rmlvo(rmlvo: Option<KeyboardConfig>) -> OwnedRawKeyboardConfig {
     let rules = rmlvo
-      .rules
-      .map(|s| CString::new(s).expect("unable to create CString for keymap"));
+      .as_ref()
+      .and_then(|config| config.rules.clone())
+      .unwrap_or_default();
     let model = rmlvo
-      .model
-      .map(|s| CString::new(s).expect("unable to create CString for keymap"));
+      .as_ref()
+      .and_then(|config| config.model.clone())
+      .unwrap_or_default();
     let layout = rmlvo
-      .layout
-      .map(|s| CString::new(s).expect("unable to create CString for keymap"));
+      .as_ref()
+      .and_then(|config| config.layout.clone())
+      .unwrap_or_default();
     let variant = rmlvo
-      .variant
-      .map(|s| CString::new(s).expect("unable to create CString for keymap"));
+      .as_ref()
+      .and_then(|config| config.variant.clone())
+      .unwrap_or_default();
     let options = rmlvo
-      .options
-      .map(|s| CString::new(s).expect("unable to create CString for keymap"));
+      .as_ref()
+      .and_then(|config| config.options.clone())
+      .unwrap_or_default();
 
+    OwnedRawKeyboardConfig {
+      rules: CString::new(rules).expect("unable to create CString for keymap"),
+      model: CString::new(model).expect("unable to create CString for keymap"),
+      layout: CString::new(layout).expect("unable to create CString for keymap"),
+      variant: CString::new(variant).expect("unable to create CString for keymap"),
+      options: CString::new(options).expect("unable to create CString for keymap"),
+    }
+  }
+
+  fn generate_names(owned_config: &OwnedRawKeyboardConfig) -> xkb_rule_names {
     xkb_rule_names {
-      rules: rules.map_or(std::ptr::null(), |s| s.as_ptr()),
-      model: model.map_or(std::ptr::null(), |s| s.as_ptr()),
-      layout: layout.map_or(std::ptr::null(), |s| s.as_ptr()),
-      variant: variant.map_or(std::ptr::null(), |s| s.as_ptr()),
-      options: options.map_or(std::ptr::null(), |s| s.as_ptr()),
+      rules: owned_config.rules.as_ptr(),
+      model: owned_config.model.as_ptr(),
+      layout: owned_config.layout.as_ptr(),
+      variant: owned_config.variant.as_ptr(),
+      options: owned_config.options.as_ptr(),
     }
   }
 }
@@ -87,4 +101,12 @@ impl Drop for Keymap {
 pub enum KeymapError {
   #[error("could not create xkb keymap")]
   FailedCreation(),
+}
+
+struct OwnedRawKeyboardConfig {
+  rules: CString,
+  model: CString,
+  layout: CString,
+  variant: CString,
+  options: CString,
 }

@@ -28,6 +28,8 @@ pub struct Paths {
   pub config: PathBuf,
   pub runtime: PathBuf,
   pub packages: PathBuf,
+
+  pub is_portable_mode: bool,
 }
 
 pub fn resolve_paths(
@@ -75,10 +77,14 @@ pub fn resolve_paths(
     packages_dir
   };
 
+  let is_portable_mode =
+    is_portable_mode() && force_config_dir.is_none() && force_runtime_dir.is_none();
+
   Paths {
     config: config_dir,
     runtime: runtime_dir,
     packages: packages_dir,
+    is_portable_mode,
   }
 }
 
@@ -208,7 +214,7 @@ fn get_portable_runtime_path() -> Option<PathBuf> {
 fn get_legacy_runtime_dir() -> Option<PathBuf> {
   let data_dir = dirs::data_local_dir().expect("unable to obtain dirs::data_local_dir()");
   let espanso_dir = data_dir.join("espanso");
-  if espanso_dir.is_dir() {
+  if is_legacy_runtime_dir(&espanso_dir) {
     Some(espanso_dir)
   } else {
     None
@@ -225,11 +231,7 @@ fn get_default_runtime_dir() -> Option<PathBuf> {
 }
 
 fn get_default_runtime_path() -> PathBuf {
-  let runtime_dir = if cfg!(target_os = "linux") {
-    dirs::runtime_dir().expect("unable to obtain dirs::runtime_dir()")
-  } else {
-    dirs::cache_dir().expect("unable to obtain dirs::cache_dir()")
-  };
+  let runtime_dir = dirs::cache_dir().expect("unable to obtain dirs::cache_dir()");
   runtime_dir.join("espanso")
 }
 
@@ -288,5 +290,32 @@ fn is_portable_mode() -> bool {
       return true;
     }
   }
+  false
+}
+
+const LEGACY_RUNTIME_DIR_CANDIDATES_FILE: &[&str] = &[
+  "espanso.log",
+  "espanso.lock",
+  "espanso-worker.lock",
+  "espanso-daemon.lock",
+];
+
+// Run an heuristic to determine if the given directory
+// is a legacy runtime dir or not.
+// Unfortunately, due to the way the legacy path works
+// we really have to analyse the content to determine this
+// information
+fn is_legacy_runtime_dir(path: &Path) -> bool {
+  if !path.is_dir() {
+    return false;
+  }
+
+  for candidate in LEGACY_RUNTIME_DIR_CANDIDATES_FILE {
+    let candidate_path = path.join(candidate);
+    if candidate_path.is_file() {
+      return true;
+    }
+  }
+
   false
 }

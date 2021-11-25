@@ -21,6 +21,7 @@
 #include <libproc.h>
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
+#import <Carbon/Carbon.h>
 
 // Taken (with a few modifications) from the MagicKeys project: https://github.com/zsszatmari/MagicKeys
 int32_t mac_utils_get_secure_input_process(int64_t *pid) {
@@ -65,4 +66,38 @@ int32_t mac_utils_get_path_from_pid(int64_t pid, char *buff, int buff_size) {
   } else {
     return 1;
   }
+}
+
+int32_t mac_utils_check_accessibility() {
+  NSDictionary* opts = @{(__bridge id)kAXTrustedCheckOptionPrompt: @NO};
+  return AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)opts);
+}
+
+int32_t mac_utils_prompt_accessibility() {
+  NSDictionary* opts = @{(__bridge id)kAXTrustedCheckOptionPrompt: @YES};
+  return AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)opts);
+}
+
+void mac_utils_transition_to_foreground_app() {
+  ProcessSerialNumber psn = { 0, kCurrentProcess };
+  TransformProcessType(&psn, kProcessTransformToForegroundApplication);
+
+  [[NSApplication sharedApplication] activateIgnoringOtherApps : YES];
+}
+
+void mac_utils_transition_to_background_app() {
+  ProcessSerialNumber psn = { 0, kCurrentProcess };
+  TransformProcessType(&psn, kProcessTransformToUIElementApplication);
+}
+
+void mac_utils_start_headless_eventloop() {
+  NSApplication * application = [NSApplication sharedApplication];
+  [NSApp run];
+}
+
+void mac_utils_exit_headless_eventloop() {
+  dispatch_async(dispatch_get_main_queue(), ^(void) {
+    [NSApp stop:nil];
+    [NSApp abortModal];
+  });
 }

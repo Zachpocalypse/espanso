@@ -24,7 +24,7 @@ use anyhow::Result;
 pub mod modulo;
 
 pub trait SearchUI {
-  fn show(&self, items: &[SearchItem]) -> Result<Option<String>>;
+  fn show(&self, items: &[SearchItem], hint: Option<&str>) -> Result<Option<String>>;
 }
 
 #[derive(Debug)]
@@ -32,10 +32,15 @@ pub struct SearchItem {
   pub id: String,
   pub label: String,
   pub tag: Option<String>,
+  pub is_builtin: bool,
 }
 
 pub trait FormUI {
-  fn show(&self, layout: &str, fields: &HashMap<String, FormField>) -> Result<Option<HashMap<String, String>>>;
+  fn show(
+    &self,
+    layout: &str,
+    fields: &HashMap<String, FormField>,
+  ) -> Result<Option<HashMap<String, String>>>;
 }
 
 #[derive(Debug)]
@@ -51,5 +56,5 @@ pub enum FormField {
   List {
     default: Option<String>,
     values: Vec<String>,
-  }
+  },
 }

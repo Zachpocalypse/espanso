@@ -24,22 +24,31 @@ use espanso_config::{
     MatchCause,
   },
 };
+use espanso_detect::hotkey::HotKey;
 use espanso_match::{
   regex::RegexMatch,
   rolling::{RollingMatch, StringMatchOptions},
 };
-use std::iter::FromIterator;
+use log::error;
+
+use crate::cli::worker::builtin::BuiltInMatch;
 
 pub struct MatchConverter<'a> {
   config_store: &'a dyn ConfigStore,
   match_store: &'a dyn MatchStore,
+  builtin_matches: &'a [BuiltInMatch],
 }
 
 impl<'a> MatchConverter<'a> {
-  pub fn new(config_store: &'a dyn ConfigStore, match_store: &'a dyn MatchStore) -> Self {
+  pub fn new(
+    config_store: &'a dyn ConfigStore,
+    match_store: &'a dyn MatchStore,
+    builtin_matches: &'a [BuiltInMatch],
+  ) -> Self {
     Self {
       config_store,
       match_store,
+      builtin_matches,
     }
   }
 
@@ -48,12 +57,13 @@ impl<'a> MatchConverter<'a> {
     let match_set = self.global_match_set();
     let mut matches = Vec::new();
 
+    // First convert configuration (user-defined) matches
     for m in match_set.matches {
       if let MatchCause::Trigger(cause) = &m.cause {
         for trigger in cause.triggers.iter() {
           matches.push(RollingMatch::from_string(
             m.id,
-            &trigger,
+            trigger,
             &StringMatchOptions {
               case_insensitive: cause.propagate_case,
               left_word: cause.left_word,
@@ -61,6 +71,17 @@ impl<'a> MatchConverter<'a> {
             },
           ))
         }
+      }
+    }
+
+    // Then convert built-in ones
+    for m in self.builtin_matches {
+      for trigger in m.triggers.iter() {
+        matches.push(RollingMatch::from_string(
+          m.id,
+          trigger,
+          &StringMatchOptions::default(),
+        ))
       }
     }
 
@@ -74,18 +95,37 @@ impl<'a> MatchConverter<'a> {
 
     for m in match_set.matches {
       if let MatchCause::Regex(cause) = &m.cause {
-        matches.push(RegexMatch::new(
-          m.id,
-          &cause.regex,
-        ))
+        matches.push(RegexMatch::new(m.id, &cause.regex))
       }
     }
 
     matches
   }
 
+  pub fn get_hotkeys(&self) -> Vec<HotKey> {
+    let mut hotkeys = Vec::new();
+
+    // TODO: read user-defined matches
+
+    // Then convert built-in ones
+    for m in self.builtin_matches {
+      if let Some(hotkey) = &m.hotkey {
+        match HotKey::new(m.id, hotkey) {
+          Ok(hotkey) => hotkeys.push(hotkey),
+          Err(err) => {
+            error!("unable to register hotkey: {}, with error: {}", hotkey, err);
+          }
+        }
+      }
+    }
+
+    hotkeys
+  }
+
   fn global_match_set(&self) -> MatchSet {
     let paths = self.config_store.get_all_match_paths();
-    self.match_store.query(&Vec::from_iter(paths.into_iter()))
+    self
+      .match_store
+      .query(&paths.into_iter().collect::<Vec<_>>())
   }
 }
